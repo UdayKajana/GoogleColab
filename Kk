@@ -1,0 +1,37 @@
+import os
+import glob
+import pandas as pd
+from datetime import datetime
+
+def load_latest_csv(folder_path):
+    """
+    Load the most recent CSV file from the specified folder.
+    
+    Parameters:
+    folder_path (str): Path to the folder containing CSV files
+    
+    Returns:
+    pandas.DataFrame: DataFrame containing the CSV data
+    str: Name of the file that was loaded
+    
+    Raises:
+    FileNotFoundError: If no CSV files are found in the specified folder
+    """
+    # Get list of all CSV files in the folder
+    csv_files = glob.glob(os.path.join(folder_path, "*.csv"))
+    
+    if not csv_files:
+        raise FileNotFoundError(f"No CSV files found in {folder_path}")
+    
+    # Get the most recent file based on modification time
+    latest_file = max(csv_files, key=os.path.getmtime)
+    
+    # Get the modification time for displaying
+    mod_timestamp = os.path.getmtime(latest_file)
+    mod_time = datetime.fromtimestamp(mod_timestamp).strftime('%Y-%m-%d %H:%M:%S')
+    
+    print(f"Loading: {os.path.basename(latest_file)}")
+    print(f"Last modified: {mod_time}")
+    
+    # Load and return the CSV file
+    return pd.read_csv(latest_file), os.path.basename(latest_file)
