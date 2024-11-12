@@ -1,0 +1,12 @@
+SELECT
+  CONCAT(r.specific_schema, '.', r.routine_name) AS procedure_full_name,
+  r.routine_definition AS query
+FROM
+  `your_project.your_dataset.INFORMATION_SCHEMA.ROUTINES` AS r
+WHERE
+  r.routine_type = 'PROCEDURE'
+  AND CONCAT(r.specific_schema, '.', r.routine_name) IN (
+      'dataset1.procedure1',
+      'dataset2.procedure2',
+      'dataset3.procedure3'
+  );
