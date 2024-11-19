@@ -1,46 +1,16 @@
-WITH all_scores AS (
-  -- Reference table for all score types (A to G)
-  SELECT 'A' AS score_name UNION ALL
-  SELECT 'B' UNION ALL
-  SELECT 'C' UNION ALL
-  SELECT 'D' UNION ALL
-  SELECT 'E' UNION ALL
-  SELECT 'F' UNION ALL
-  SELECT 'G'
-),
-customer_scores AS (
-  -- Get all customer-score combinations present in the table
-  SELECT DISTINCT cust_id, score_name
-  FROM your_table
-),
-all_customer_scores AS (
-  -- Generate all possible combinations of cust_id and score_name
-  SELECT 
-    DISTINCT cust_id, 
-    score_name
-  FROM (SELECT DISTINCT cust_id FROM your_table) custs
-  CROSS JOIN all_scores
-),
-missing_scores AS (
-  -- Identify missing scores for each customer
-  SELECT 
-    acs.score_name,
-    acs.cust_id
-  FROM all_customer_scores acs
-  LEFT JOIN customer_scores cs
-    ON acs.cust_id = cs.cust_id AND acs.score_name = cs.score_name
-  WHERE cs.cust_id IS NULL
-),
-final_counts AS (
-  -- Count the number of customers missing each score type
-  SELECT 
-    score_name,
-    COUNT(DISTINCT cust_id) AS missing_customers
-  FROM missing_scores
-  GROUP BY score_name
-)
-SELECT 
-  score_name,
-  missing_customers
-FROM final_counts
-ORDER BY score_name;
+def convert_to_single_line(multiline_query):
+    # Strip leading/trailing whitespace and replace newlines with spaces
+    single_line_query = ' '.join(line.strip() for line in multiline_query.splitlines())
+    # Remove extra spaces
+    return ' '.join(single_line_query.split())
+
+# Example multiline query
+multiline_query = """
+SELECT ddl
+FROM `my_project`.`my_dataset`.INFORMATION_SCHEMA.TABLES
+WHERE table_name = 'my_table';
+"""
+
+# Convert to single-line query
+single_line_query = convert_to_single_line(multiline_query)
+print(single_line_query)
