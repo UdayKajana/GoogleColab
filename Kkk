@@ -1,5 +1,5 @@
 WITH all_scores AS (
-  -- Create a reference list of all score types (A to G)
+  -- Reference table for all score types (A to G)
   SELECT 'A' AS score_name UNION ALL
   SELECT 'B' UNION ALL
   SELECT 'C' UNION ALL
@@ -7,25 +7,40 @@ WITH all_scores AS (
   SELECT 'E' UNION ALL
   SELECT 'F' UNION ALL
   SELECT 'G'
-), 
-score_summary AS (
+),
+customer_scores AS (
+  -- Get all customer-score combinations present in the table
+  SELECT DISTINCT cust_id, score_name
+  FROM your_table
+),
+all_customer_scores AS (
+  -- Generate all possible combinations of cust_id and score_name
+  SELECT 
+    DISTINCT cust_id, 
+    score_name
+  FROM (SELECT DISTINCT cust_id FROM your_table) custs
+  CROSS JOIN all_scores
+),
+missing_scores AS (
+  -- Identify missing scores for each customer
+  SELECT 
+    acs.score_name,
+    acs.cust_id
+  FROM all_customer_scores acs
+  LEFT JOIN customer_scores cs
+    ON acs.cust_id = cs.cust_id AND acs.score_name = cs.score_name
+  WHERE cs.cust_id IS NULL
+),
+final_counts AS (
+  -- Count the number of customers missing each score type
   SELECT 
     score_name,
-    COUNT(DISTINCT cust_id) AS total_customers -- Count customers who have this score
-  FROM your_table
-  WHERE score IS NOT NULL -- Consider only customers with valid scores
+    COUNT(DISTINCT cust_id) AS missing_customers
+  FROM missing_scores
   GROUP BY score_name
-), 
-all_customers AS (
-  -- Get the total number of unique customers
-  SELECT COUNT(DISTINCT cust_id) AS total_customers
-  FROM your_table
 )
 SELECT 
-  a.score_name,
-  c.total_customers - IFNULL(s.total_customers, 0) AS not_scored_customers
-FROM all_scores a
-LEFT JOIN score_summary s
-  ON a.score_name = s.score_name
-CROSS JOIN all_customers c
-ORDER BY a.score_name;
+  score_name,
+  missing_customers
+FROM final_counts
+ORDER BY score_name;
