@@ -1,12 +1,31 @@
-SELECT
-  CONCAT(r.specific_schema, '.', r.routine_name) AS procedure_full_name,
-  r.routine_definition AS query
-FROM
-  `your_project.your_dataset.INFORMATION_SCHEMA.ROUTINES` AS r
-WHERE
-  r.routine_type = 'PROCEDURE'
-  AND CONCAT(r.specific_schema, '.', r.routine_name) IN (
-      'dataset1.procedure1',
-      'dataset2.procedure2',
-      'dataset3.procedure3'
-  );
+WITH all_scores AS (
+  -- Create a reference list of all score types (A to G)
+  SELECT 'A' AS score_name UNION ALL
+  SELECT 'B' UNION ALL
+  SELECT 'C' UNION ALL
+  SELECT 'D' UNION ALL
+  SELECT 'E' UNION ALL
+  SELECT 'F' UNION ALL
+  SELECT 'G'
+), 
+score_summary AS (
+  SELECT 
+    score_name,
+    COUNT(DISTINCT cust_id) AS total_customers -- Count customers who have this score
+  FROM your_table
+  WHERE score IS NOT NULL -- Consider only customers with valid scores
+  GROUP BY score_name
+), 
+all_customers AS (
+  -- Get the total number of unique customers
+  SELECT COUNT(DISTINCT cust_id) AS total_customers
+  FROM your_table
+)
+SELECT 
+  a.score_name,
+  c.total_customers - IFNULL(s.total_customers, 0) AS not_scored_customers
+FROM all_scores a
+LEFT JOIN score_summary s
+  ON a.score_name = s.score_name
+CROSS JOIN all_customers c
+ORDER BY a.score_name;
