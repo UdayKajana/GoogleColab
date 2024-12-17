@@ -1,149 +1,47 @@
-import io
-import json
-import traceback
-import pandas as pd
-from google.cloud import pubsub_v1
-import avro.schema
-from avro.io import DatumReader, BinaryDecoder
-from io import BytesIO
-
-def debug_avro_message(message_data):
-    """
-    Comprehensive debugging function to understand the Avro message structure
-    """
-    print("--- Message Data Debug ---")
-    print(f"Message type: {type(message_data)}")
-    print(f"Message length: {len(message_data) if hasattr(message_data, '__len__') else 'N/A'}")
-    
-    try:
-        # Try to inspect the first few bytes
-        print("First 50 bytes (hex):", message_data[:50].hex())
-    except Exception as e:
-        print(f"Could not print hex representation: {e}")
-
-def create_flexible_schema():
-    """
-    Create a flexible Avro schema that can handle various input types
-    """
-    return avro.schema.parse(json.dumps({
-        "type": "record",
-        "name": "FlexibleRecord",
-        "fields": [
-            {"name": "ont_activation_date", "type": ["null", "string", "int", "long"]},
-            {"name": "data_circuit_id", "type": ["null", "string", "int", "long"]},
-            {"name": "circuit_id", "type": ["null", "string", "int", "long"]},
-            {"name": "video_circuit_id", "type": ["null", "string", "int", "long"]},
-            {"name": "service_type", "type": ["null", "string", "int", "long"]},
-            {"name": "address_id", "type": ["null", "string", "int", "long"]},
-            {"name": "vision_account_id", "type": ["null", "string", "int", "long"]},
-            {"name": "vision_customer_id", "type": ["null", "string", "int", "long"]},
-            {"name": "address_type", "type": ["null", "string", "int", "long"]},
-            {"name": "line_of_business", "type": ["null", "string", "int", "long"]}
-        ]
-    }))
-
-def process_avro_message(message):
-    """
-    Robust Avro message processing with comprehensive error handling
-    """
-    try:
-        # Debug the incoming message
-        debug_avro_message(message.data)
-        
-        # Create a flexible schema
-        avro_schema = create_flexible_schema()
-        
-        # Create readers with flexible handling
-        bytes_reader = BytesIO(message.data)
-        decoder = BinaryDecoder(bytes_reader)
-        reader = DatumReader(avro_schema)
-        
-        rows = []
-        try:
-            # Attempt multiple reading strategies
-            def safe_read_record():
-                """Safely read a single record with error handling"""
-                try:
-                    record = reader.read(decoder)
-                    processed_record = {}
-                    
-                    # Safely extract fields
-                    for field in avro_schema.fields:
-                        field_name = field.name
-                        try:
-                            value = record.get(field_name)
-                            
-                            # Comprehensive value handling
-                            if value is None:
-                                processed_record[field_name] = None
-                            elif isinstance(value, (dict, list)):
-                                processed_record[field_name] = str(value)
-                            else:
-                                processed_record[field_name] = value
-                        except Exception as field_error:
-                            print(f"Error processing field {field_name}: {field_error}")
-                            processed_record[field_name] = None
-                    
-                    return processed_record
-                except Exception as read_error:
-                    print(f"Error reading record: {read_error}")
-                    return None
-            
-            # Read records with multiple attempts
-            max_attempts = 5
-            for attempt in range(max_attempts):
-                try:
-                    record = safe_read_record()
-                    if record:
-                        rows.append(record)
-                except EOFError:
-                    break
-                except Exception as e:
-                    print(f"Attempt {attempt + 1} failed: {e}")
-            
-            # Process and save results
-            if rows:
-                df = pd.DataFrame(rows)
-                csv_filename = f'pubsub_data_{pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")}.csv'
-                df.to_csv(csv_filename, index=False)
-                print(f"Saved {len(df)} records to {csv_filename}")
-                message.ack()
-                return df
-            else:
-                print("No records could be processed from the message")
-                message.ack()
-                return None
-        
-        except Exception as read_error:
-            print(f"Comprehensive read error: {read_error}")
-            print(traceback.format_exc())
-            message.nack()
-            return None
-    
-    except Exception as overall_error:
-        print(f"Overall message processing error: {overall_error}")
-        print(traceback.format_exc())
-        message.nack()
-        return None
-
-# Pub/Sub configuration
-project_id = "vz-it-np-gudv-dev-vzntdo-0"
-subscription_id = "wireline_churn_test_topic-sub"
-
-# Create Pub/Sub subscriber
-subscriber = pubsub_v1.SubscriberClient()
-subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
-
-# Subscribe and process messages
-streaming_pull_future = subscriber.subscribe(subscription_path, callback=process_avro_message)
-
-print("Listening for messages on subscription:", subscription_path)
-
-with subscriber:
-    try:
-        # Increased timeout and added more verbose logging
-        streaming_pull_future.result(timeout=600)  # 10-minute timeout
-    except TimeoutError:
-        print("Subscription timed out")
-        streaming_pull_future.cancel()
-        streaming_pull_future.result()
+Listening for messages on subscription: projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/wireline_churn_test_topic-sub
+--- Message Data Debug ---
+Message type: <class 'bytes'>
+Message length: 2724599
+First 50 bytes (hex): 4f626a0104146176726f2e636f646563086e756c6c166176726f2e736368656d61fe097b226e616d657370616365223a2022
+Error reading record: list index out of range
+Error reading record: Can't access branch index 49 for union with 4 branches
+Writer's Schema: [
+  "null",
+  "string",
+  "int",
+  "long"
+]
+Reader's Schema: [
+  "null",
+  "string",
+  "int",
+  "long"
+]
+Error reading record: Can't access branch index 53 for union with 4 branches
+Writer's Schema: [
+  "null",
+  "string",
+  "int",
+  "long"
+]
+Reader's Schema: [
+  "null",
+  "string",
+  "int",
+  "long"
+]
+Error reading record: Can't access branch index 10 for union with 4 branches
+Writer's Schema: [
+  "null",
+  "string",
+  "int",
+  "long"
+]
+Reader's Schema: [
+  "null",
+  "string",
+  "int",
+  "long"
+]
+Error reading record: list index out of range
+No records could be processed from the message
