@@ -4,7 +4,6 @@ from fastavro import reader
 import io as inputoutput
 import csv
 import typing
-import uuid
 import logging
 logging.getLogger().setLevel(logging.INFO)
 project_id = "vz-it-np-gudv-dev-vzntdo-0"
@@ -28,38 +27,45 @@ schema = [
 
 def parse_avro_message(message):
     try:
-        avro_file = inputoutput.BytesIO(message)
+        import io
+        from fastavro import reader
+        avro_file = io.BytesIO(message)
         avro_reader = reader(avro_file)
-        avro_schema = reader.writer_schema
-        logging.log(logging.INFO,str(avro_schema))
         records = []
         for record in avro_reader:
             records.append(record)
-            logging.log(logging.INFO,str(record))
-        logging.log(logging.INFO,"Total Size of files: "+(len(records)))
+        #logging.log(logging.INFO,"Total Size of files: "+(str(len(records))))
+        #logging.log(logging.INFO,str(records))
         yield records  
     except Exception as e:
         logging.log(logging.INFO,f"Error parsing Avro message: {e}")
 
-def format_to_csv(records: typing.List[dict]) -> str:
-    logging.log(logging.INFO,"records#="+records)
+def create_unique_filename(records: typing.List[dict]) -> typing.Tuple[str, str]:
+    import io
+    import csv
+    import uuid
+    schema = [
+    "ont_activation_date",
+    "data_circuit_id",
+    "circuit_id",
+    "video_circuit_id",
+    "service_type",
+    "address_id",
+    "vision_account_id",
+    "vision_customer_id",
+    "address_type",
+    "line_of_business"
+]
+    filename = f"customer_profile_{uuid.uuid4()}.csv"
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=schema)
-
     writer.writeheader()
     for record in records:
-        logging.log(logging.INFO,"record#="+records)
         writer.writerow(record)
-
-    return output.getvalue()
-
-def create_unique_filename(records: typing.List[dict]) -> typing.Tuple[str, str]:
-    csv_data = format_to_csv(records)
-    filename = f"customer_profile_{uuid.uuid4()}.csv"
-    print(csv_data)
-    return filename, csv_data
+    return filename, output.getvalue()
 
 def run_pipeline():
+    import apache_beam as beam
     with beam.Pipeline(options=pipeline_options) as pipeline:
         messages = (
             pipeline
@@ -71,8 +77,13 @@ def run_pipeline():
         )
         csv_data = (
             parsed_data
-            | "FormatToCSV" >> beam.Map(Print_element)
+            | "FormatToCSV" >> beam.Map(create_unique_filename)
         )
+        csv_data | "WriteToGCS" >> beam.Map(lambda x: beam.io.WriteToText(
+            f"gs://vznet-test/wireline_churn_test/tgt/",
+            file_name_suffix=".csv",
+            num_shards=1 
+        ))
 
 def Print_element(element):
     logging.info("element="+str(element))
