@@ -1,47 +1,112 @@
-Listening for messages on subscription: projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/wireline_churn_test_topic-sub
---- Message Data Debug ---
-Message type: <class 'bytes'>
-Message length: 2724599
-First 50 bytes (hex): 4f626a0104146176726f2e636f646563086e756c6c166176726f2e736368656d61fe097b226e616d657370616365223a2022
-Error reading record: list index out of range
-Error reading record: Can't access branch index 49 for union with 4 branches
-Writer's Schema: [
-  "null",
-  "string",
-  "int",
-  "long"
-]
-Reader's Schema: [
-  "null",
-  "string",
-  "int",
-  "long"
-]
-Error reading record: Can't access branch index 53 for union with 4 branches
-Writer's Schema: [
-  "null",
-  "string",
-  "int",
-  "long"
-]
-Reader's Schema: [
-  "null",
-  "string",
-  "int",
-  "long"
-]
-Error reading record: Can't access branch index 10 for union with 4 branches
-Writer's Schema: [
-  "null",
-  "string",
-  "int",
-  "long"
-]
-Reader's Schema: [
-  "null",
-  "string",
-  "int",
-  "long"
-]
-Error reading record: list index out of range
-No records could be processed from the message
+import io
+import json
+import traceback
+import pandas as pd
+from google.cloud import pubsub_v1
+import avro.schema
+from avro.io import DatumReader, BinaryDecoder
+from io import BytesIO
+import fastavro
+
+def extract_avro_schema_from_message(message_data):
+    """
+    Attempt to extract the Avro schema from the message
+    """
+    try:
+        # Use fastavro to read the schema
+        bytes_reader = BytesIO(message_data)
+        reader = fastavro.reader(bytes_reader)
+        
+        # Extract the writer's schema
+        writer_schema = reader.schema
+        print("Extracted Writer's Schema:")
+        print(json.dumps(writer_schema, indent=2))
+        
+        return writer_schema
+    except Exception as e:
+        print(f"Error extracting schema: {e}")
+        return None
+
+def process_avro_message(message):
+    """
+    Robust Avro message processing with dynamic schema handling
+    """
+    try:
+        # Print basic message info
+        print(f"--- Message Debug ---")
+        print(f"Message type: {type(message.data)}")
+        print(f"Message length: {len(message.data)}")
+        
+        # Extract the writer's schema
+        writer_schema = extract_avro_schema_from_message(message.data)
+        if not writer_schema:
+            print("Failed to extract schema")
+            message.nack()
+            return None
+        
+        # Reset the bytes reader
+        bytes_reader = BytesIO(message.data)
+        
+        # Use fastavro to read records
+        rows = []
+        try:
+            for record in fastavro.reader(bytes_reader, writer_schema):
+                # Process each record
+                processed_record = {}
+                for key, value in record.items():
+                    # Handle various value types
+                    if value is None:
+                        processed_record[key] = None
+                    elif isinstance(value, (dict, list)):
+                        processed_record[key] = str(value)
+                    else:
+                        processed_record[key] = value
+                
+                rows.append(processed_record)
+            
+            # Save processed records
+            if rows:
+                df = pd.DataFrame(rows)
+                csv_filename = f'pubsub_data_{pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")}.csv'
+                df.to_csv(csv_filename, index=False)
+                print(f"Saved {len(df)} records to {csv_filename}")
+                message.ack()
+                return df
+            else:
+                print("No records could be processed from the message")
+                message.ack()
+                return None
+        
+        except Exception as read_error:
+            print(f"Error reading Avro records: {read_error}")
+            print(traceback.format_exc())
+            message.nack()
+            return None
+    
+    except Exception as overall_error:
+        print(f"Overall message processing error: {overall_error}")
+        print(traceback.format_exc())
+        message.nack()
+        return None
+
+# Pub/Sub configuration
+project_id = "vz-it-np-gudv-dev-vzntdo-0"
+subscription_id = "wireline_churn_test_topic-sub"
+
+# Create Pub/Sub subscriber
+subscriber = pubsub_v1.SubscriberClient()
+subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
+
+# Subscribe and process messages
+streaming_pull_future = subscriber.subscribe(subscription_path, callback=process_avro_message)
+
+print("Listening for messages on subscription:", subscription_path)
+
+with subscriber:
+    try:
+        # Extended timeout for long-running subscription
+        streaming_pull_future.result(timeout=900)  # 15-minute timeout
+    except TimeoutError:
+        print("Subscription timed out")
+        streaming_pull_future.cancel()
+        streaming_pull_future.result()
