@@ -6,13 +6,19 @@ import csv
 import typing
 import uuid
 import logging
-logging.getLogger().setLevel(logging.INFO)
+import json
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, 
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Configuration
 project_id = "vz-it-np-gudv-dev-vzntdo-0"
 subscription_id = "wireline_churn_test_topic-sub"
 subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
 gcs_bucket = "vznet-test"
 gcs_output_path = "wireline_churn_test/tgt/customer_profile"
-
 schema = [
     "ont_activation_date",
     "data_circuit_id",
@@ -27,59 +33,158 @@ schema = [
 ]
 
 def parse_avro_message(message):
+    """
+    Parse Avro message and extract records
+    
+    Args:
+        message: Pub/Sub message containing Avro-encoded data
+    
+    Returns:
+        List of parsed records
+    """
     try:
+        # Log the raw message size
+        logger.info(f"Received message size: {len(message.data)} bytes")
+        
+        # Create BytesIO object from message data
         avro_bytes = message.data
         avro_file = io.BytesIO(avro_bytes)
+        
+        # Read Avro records
         avro_reader = reader(avro_file)
         records = []
+        
+        # Collect and log each record
         for record in avro_reader:
+            logger.debug(f"Parsed record: {json.dumps(record, indent=2)}")
             records.append(record)
-        logging.log("Total Size of files: "+(len(records)))
-        yield records  
+        
+        # Log total number of records
+        logger.info(f"Total records parsed: {len(records)}")
+        
+        return records
+    
     except Exception as e:
-        print(f"Error parsing Avro message: {e}")
+        logger.error(f"Error parsing Avro message: {e}", exc_info=True)
+        return []
 
 def format_to_csv(records: typing.List[dict]) -> str:
-    logging.log("records#="+records)
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=schema)
-    writer.writeheader()
-    for record in records:
-        logging.log("record#="+records)
-        writer.writerow(record)
-
-    return output.getvalue()
+    """
+    Convert records to CSV format
+    
+    Args:
+        records: List of dictionaries to convert to CSV
+    
+    Returns:
+        CSV-formatted string
+    """
+    try:
+        # Log number of records to be converted
+        logger.info(f"Formatting {len(records)} records to CSV")
+        
+        # Create StringIO buffer for CSV writing
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=schema)
+        
+        # Write headers
+        writer.writeheader()
+        
+        # Write each record, logging any issues
+        for record in records:
+            try:
+                # Validate record has all required fields
+                validated_record = {field: record.get(field, '') for field in schema}
+                writer.writerow(validated_record)
+                logger.debug(f"Wrote record: {validated_record}")
+            except Exception as record_err:
+                logger.error(f"Error writing record: {record_err}")
+        
+        # Get CSV content
+        csv_content = output.getvalue()
+        logger.info(f"CSV content length: {len(csv_content)} characters")
+        
+        return csv_content
+    
+    except Exception as e:
+        logger.error(f"Error formatting CSV: {e}", exc_info=True)
+        return ''
 
 def create_unique_filename(records: typing.List[dict]) -> typing.Tuple[str, str]:
-    csv_data = format_to_csv(records)
-    filename = f"customer_profile_{uuid.uuid4()}.csv"
-
-    return filename, csv_data
+    """
+    Create a unique filename for CSV and return filename with content
+    
+    Args:
+        records: List of records to be written to CSV
+    
+    Returns:
+        Tuple of (filename, CSV content)
+    """
+    try:
+        # Convert records to CSV
+        csv_data = format_to_csv(records)
+        
+        # Generate unique filename
+        filename = f"customer_profile_{uuid.uuid4()}.csv"
+        
+        logger.info(f"Created filename: {filename}")
+        logger.info(f"CSV data length: {len(csv_data)} characters")
+        
+        return filename, csv_data
+    
+    except Exception as e:
+        logger.error(f"Error creating filename: {e}", exc_info=True)
+        return '', ''
 
 def run_pipeline():
-    with beam.Pipeline(options=pipeline_options) as pipeline:
-        messages = (
-            pipeline
-            | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
-        )
-        parsed_data = (
-            messages
-            | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)
-        )
-        csv_data = (
-            parsed_data
-            | "FormatToCSV" >> beam.Map(create_unique_filename)
-        )
-
-def Print_element(element):
-    logging.info("element="+str(element))
-    return element
-pipeline_options = PipelineOptions(
-    streaming=True,
-    project=project_id,
-    temp_location=f"gs://{gcs_bucket}/wireline_churn_test/tmp",
-    region="us-central1"
-)
+    """
+    Execute the Apache Beam pipeline for processing Pub/Sub messages
+    """
+    # Configure pipeline options
+    pipeline_options = PipelineOptions(
+        streaming=True,
+        project=project_id,
+        temp_location=f"gs://{gcs_bucket}/wireline_churn_test/tmp",
+        region="us-central1"
+    )
+    
+    try:
+        # Create pipeline
+        with beam.Pipeline(options=pipeline_options) as pipeline:
+            # Read from Pub/Sub
+            messages = (
+                pipeline
+                | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
+            )
+            
+            # Debug logging for messages
+            messages | "LogMessages" >> beam.Map(lambda msg: logger.info(f"Received message: {len(msg.data)} bytes"))
+            
+            # Parse Avro messages
+            parsed_data = (
+                messages
+                | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)
+            )
+            
+            # Debug logging for parsed data
+            parsed_data | "LogParsedData" >> beam.Map(lambda records: logger.info(f"Parsed records count: {len(records)}"))
+            
+            # Convert to CSV
+            csv_data = (
+                parsed_data
+                | "FormatToCSV" >> beam.Map(create_unique_filename)
+            )
+            
+            # Write to GCS
+            csv_data | "WriteToGCS" >> beam.io.WriteToText(
+                f"gs://{gcs_bucket}/{gcs_output_path}/customer_profile",
+                file_name_suffix='.csv'
+            )
+            
+            # Log pipeline result
+            logger.info("Pipeline setup completed successfully")
+    
+    except Exception as pipeline_err:
+        logger.error(f"Pipeline execution error: {pipeline_err}", exc_info=True)
 
 if __name__ == '__main__':
     run_pipeline()
