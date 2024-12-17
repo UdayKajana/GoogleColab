@@ -1,133 +1,105 @@
 import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.transforms.window import FixedWindows
+from apache_beam.transforms.trigger import AfterWatermark, AfterProcessingTime, Repeatedly, AccumulationMode
 from fastavro import reader
 import io
 import csv
-import uuid
-from datetime import datetime
-from google.cloud import storage
+import typing
 
-class AvroToCsvPipeline:
-    def __init__(self):
-        # Configuration
-        self.PROJECT_ID = "vz-it-np-gudv-dev-vzntdo-0"
-        self.SUBSCRIPTION_ID = "wireline_churn_test_topic-sub"
-        self.SUBSCRIPTION_PATH = f"projects/{self.PROJECT_ID}/subscriptions/{self.SUBSCRIPTION_ID}"
-        self.GCS_BUCKET = "vznet-test"
-        self.GCS_OUTPUT_PATH = "wireline_churn_test/tgt/customer_profile"
+# Define your Pub/Sub subscription and GCS bucket details
+project_id = "vz-it-np-gudv-dev-vzntdo-0"
+subscription_id = "wireline_churn_test_topic-sub"
+subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
+gcs_bucket = "vznet-test"
+gcs_output_path = "wireline_churn_test/tgt/customer_profile"
 
-        # Avro schema (ensure this matches your Avro file structure)
-        self.SCHEMA = [
-            "ont_activation_date",
-            "data_circuit_id",
-            "circuit_id",
-            "video_circuit_id",
-            "service_type",
-            "address_id",
-            "vision_account_id",
-            "vision_customer_id",
-            "address_type",
-            "line_of_business"
-        ]
+# Avro schema
+schema = [
+    "ont_activation_date",
+    "data_circuit_id",
+    "circuit_id",
+    "video_circuit_id",
+    "service_type",
+    "address_id",
+    "vision_account_id",
+    "vision_customer_id",
+    "address_type",
+    "line_of_business"
+]
 
-        # Configure pipeline options for streaming
-        self.pipeline_options = PipelineOptions([
-            '--streaming',
-            f'--project={self.PROJECT_ID}',
-            f'--temp_location=gs://{self.GCS_BUCKET}/wireline_churn_test/tmp',
-            '--region=us-central1'
-        ])
-        
-        # Ensure streaming is enabled
-        self.pipeline_options.view_as(StandardOptions).streaming = True
+# Function to parse Avro messages
+def parse_avro_message(message):
+    try:
+        avro_bytes = message.data
+        avro_file = io.BytesIO(avro_bytes)
+        avro_reader = reader(avro_file)
+        for record in avro_reader:
+            yield (record.get("address_id", "unknown"), record)
+    except Exception as e:
+        print(f"Error parsing Avro message: {e}")
 
-    def process_avro_message(self, message):
-        """
-        Process a single Avro message and convert to CSV.
-        
-        Args:
-            message: Pub/Sub message containing a complete Avro file
-        
-        Returns:
-            Filename and CSV content
-        """
-        try:
-            # Extract Avro bytes from the message
-            avro_bytes = message.data
-            avro_file = io.BytesIO(avro_bytes)
-            avro_reader = reader(avro_file)
-            
-            # Generate unique filename
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            unique_id = str(uuid.uuid4())[:8]
-            filename = f"customer_profile_{timestamp}_{unique_id}.csv"
-            
-            # Create CSV content
-            output = io.StringIO()
-            writer = csv.DictWriter(output, fieldnames=self.SCHEMA)
-            
-            # Write header and records
-            writer.writeheader()
-            for record in avro_reader:
-                # Ensure only records with the defined schema are written
-                filtered_record = {
-                    field: record.get(field, '') 
-                    for field in self.SCHEMA
-                }
-                writer.writerow(filtered_record)
-            
-            # Return filename and CSV content
-            return (filename, output.getvalue())
-        
-        except Exception as e:
-            print(f"Error processing Avro message: {e}")
-            return None
+# Function to format grouped records into CSV
+def format_grouped_records(key_and_records: typing.Tuple[str, typing.Iterable[dict]]) -> str:
+    key, records = key_and_records
+    # Convert records to a list
+    records = list(records)  
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=schema)
+    writer.writeheader()
+    for record in records:
+        writer.writerow(record)
+    return output.getvalue()
 
-    def write_to_gcs(self, filename_and_content):
-        """
-        Write content to GCS with the given filename.
-        
-        Args:
-            filename_and_content (tuple): (filename, CSV content)
-        """
-        if filename_and_content is None:
-            return
-        
-        filename, content = filename_and_content
-        
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(self.GCS_BUCKET)
-        blob = bucket.blob(f"{self.GCS_OUTPUT_PATH}/{filename}")
-        
-        blob.upload_from_string(content)
-        print(f"Uploaded {filename} to gs://{self.GCS_BUCKET}/{self.GCS_OUTPUT_PATH}")
+pipeline_options = PipelineOptions(
+    streaming=True,
+    project=project_id,
+    temp_location=f"gs://{gcs_bucket}/wireline_churn_test/tmp",
+    region="us-central1"
+)
 
-    def run(self):
-        """
-        Execute the Avro to CSV streaming pipeline.
-        """
-        with beam.Pipeline(options=self.pipeline_options) as pipeline:
-            # Read from Pub/Sub
-            messages = (
-                pipeline
-                | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=self.SUBSCRIPTION_PATH)
+def run_pipeline():
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        messages = (
+            pipeline
+            | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
+        )
+        windowed_data = (
+            messages
+            | "WindowIntoFixed" >> beam.WindowInto(
+                FixedWindows(60),  # 1-minute windows
+                trigger=AfterWatermark(
+                    early=AfterProcessingTime(30),  # Emit partial results after 30 seconds
+                    late=AfterProcessingTime(60)    # Wait an additional 60 seconds for late data
+                ),
+                accumulation_mode=AccumulationMode.DISCARDING
             )
-            
-            # Process each Avro message into a separate CSV
-            csv_files = (
-                messages
-                | "ProcessAvroToCsv" >> beam.Map(self.process_avro_message)
-            )
-            
-            # Write CSV files to GCS
-            csv_files | "WriteToGCS" >> beam.Map(self.write_to_gcs)
-
-def main():
-    """
-    Main entry point for the Avro to CSV streaming pipeline.
-    """
-    pipeline = AvroToCsvPipeline()
-    pipeline.run()
+        )
+        
+        # Step 3: Parse Avro messages and assign keys
+        parsed_data = (
+            windowed_data
+            | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)
+        )
+        
+        # Step 4: Group by Key within the window
+        grouped_data = (
+            parsed_data
+            | "GroupByKey" >> beam.GroupByKey()
+        )
+        
+        # Step 5: Format grouped records as CSV
+        csv_data = (
+            grouped_data
+            | "FormatToCSV" >> beam.Map(format_grouped_records)
+        )
+        
+        # Step 6: Write the CSV data to GCS
+        csv_data | "WriteToGCS" >> beam.io.WriteToText(
+            f"gs://{gcs_bucket}/{gcs_output_path}",
+            file_name_suffix=".csv",
+            shard_name_template="-SS"  # Minimal sharding to ensure unique filenames
+        )
 
 if __name__ == '__main__':
-    main()
+    run_pipeline()
