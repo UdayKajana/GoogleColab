@@ -5,7 +5,10 @@ import io as inputoutput
 import csv
 import typing
 import logging
+import uuid
+
 logging.getLogger().setLevel(logging.INFO)
+
 project_id = "vz-it-np-gudv-dev-vzntdo-0"
 subscription_id = "wireline_churn_test_topic-sub"
 subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
@@ -34,66 +37,61 @@ def parse_avro_message(message):
         records = []
         for record in avro_reader:
             records.append(record)
-        #logging.log(logging.INFO,"Total Size of files: "+(str(len(records))))
-        #logging.log(logging.INFO,str(records))
-        yield records  
+        return records
     except Exception as e:
-        logging.log(logging.INFO,f"Error parsing Avro message: {e}")
+        logging.error(f"Error parsing Avro message: {e}")
+        return []
 
-def create_unique_filename(records: typing.List[dict]) -> typing.Tuple[str, str]:
-    import io
-    import csv
-    import uuid
-    schema = [
-    "ont_activation_date",
-    "data_circuit_id",
-    "circuit_id",
-    "video_circuit_id",
-    "service_type",
-    "address_id",
-    "vision_account_id",
-    "vision_customer_id",
-    "address_type",
-    "line_of_business"
-]
+def create_unique_filename(records):
+    if not records:
+        return None
+    
     filename = f"customer_profile_{uuid.uuid4()}.csv"
+    
+    # Prepare CSV content
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=schema)
     writer.writeheader()
     for record in records:
-        writer.writerow(record)
+        # Ensure record matches the schema
+        filtered_record = {col: record.get(col, '') for col in schema}
+        writer.writerow(filtered_record)
+    
     return filename, output.getvalue()
 
 def run_pipeline():
-    import apache_beam as beam
+    # Configure pipeline options
+    pipeline_options = PipelineOptions(
+        streaming=True,
+        project=project_id,
+        temp_location=f"gs://{gcs_bucket}/wireline_churn_test/tmp",
+        region="us-central1"
+    )
+    
     with beam.Pipeline(options=pipeline_options) as pipeline:
+        # Read from Pub/Sub
         messages = (
             pipeline
             | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
         )
+        
+        # Parse Avro messages
         parsed_data = (
             messages
-            | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)
+            | "ParseAvroMessages" >> beam.Map(parse_avro_message)
         )
+        
+        # Convert to CSV
         csv_data = (
             parsed_data
             | "FormatToCSV" >> beam.Map(create_unique_filename)
         )
-        csv_data | "WriteToGCS" >> beam.Map(lambda x: beam.io.WriteToText(
-            f"gs://vznet-test/wireline_churn_test/tgt/",
-            file_name_suffix=".csv",
-            num_shards=1 
-        ))
-
-def Print_element(element):
-    logging.info("element="+str(element))
-    return element
-pipeline_options = PipelineOptions(
-    streaming=True,
-    project=project_id,
-    temp_location=f"gs://{gcs_bucket}/wireline_churn_test/tmp",
-    region="us-central1"
-)
+        
+        # Write to GCS
+        csv_data | "WriteToGCS" >> beam.io.WriteToText(
+            f"gs://{gcs_bucket}/{gcs_output_path}/",
+            file_name_suffix=".csv"
+        )
 
 if __name__ == '__main__':
     run_pipeline()
