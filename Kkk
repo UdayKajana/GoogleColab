@@ -1,134 +1,105 @@
 import apache_beam as beam
-from apache_beam.io.avroio import ReadFromAvro
-from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions, GoogleCloudOptions, SetupOptions
-import csv
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.transforms.window import FixedWindows
+from apache_beam.transforms.trigger import AfterWatermark, AfterProcessingTime, Repeatedly, AccumulationMode
+from fastavro import reader
 import io
-import uuid
-from google.cloud import storage
+import csv
+import typing
 
-class AvroToCsvPipeline:
-    def __init__(self):
-        """
-        Initialize the Avro to CSV conversion pipeline with hardcoded configurations.
-        """
-        # Hardcoded configuration parameters
-        self.PROJECT_ID = 'your-project-id'  # Replace with your GCP project ID
-        self.REGION = 'us-central1'  # GCP region for Dataflow job
-        
-        # Input Avro file configuration
-        self.INPUT_AVRO_PATH = 'gs://your-input-bucket/input.avro'  # Full path to input Avro file
-        
-        # Output CSV configuration
-        self.OUTPUT_BUCKET = 'your-output-bucket'  # GCS bucket for output
-        self.OUTPUT_PATH = 'avro_to_csv_output/'  # Path within the bucket
-        
-        # Staging and temp locations
-        self.STAGING_LOCATION = f'gs://{self.OUTPUT_BUCKET}/staging'
-        self.TEMP_LOCATION = f'gs://{self.OUTPUT_BUCKET}/temp'
-        
-        # Pipeline runner (DataflowRunner for cloud execution)
-        self.RUNNER = 'DataflowRunner'
-        
-        # Configure pipeline options
-        self.pipeline_options = self.configure_pipeline_options()
-    
-    def configure_pipeline_options(self):
-        """
-        Configure comprehensive pipeline options for Dataflow with hardcoded settings.
-        
-        Returns:
-            PipelineOptions: Configured pipeline options
-        """
-        # Create pipeline options
-        options = PipelineOptions()
-        
-        # Set Google Cloud specific configurations
-        google_cloud_options = options.view_as(GoogleCloudOptions)
-        google_cloud_options.project = self.PROJECT_ID
-        google_cloud_options.region = self.REGION
-        google_cloud_options.staging_location = self.STAGING_LOCATION
-        google_cloud_options.temp_location = self.TEMP_LOCATION
-        
-        # Generate a unique job name
-        google_cloud_options.job_name = f'avro-to-csv-{uuid.uuid4().hex[:10]}'
-        
-        # Set runner
-        options.view_as(StandardOptions).runner = self.RUNNER
-        
-        # Configure setup options
-        setup_options = options.view_as(SetupOptions)
-        setup_options.save_main_session = True
-        
-        return options
-    
-    def convert_to_csv(self, element):
-        """
-        Convert a single Avro record to a CSV string.
-        
-        Args:
-            element (dict): A single Avro record
-        
-        Returns:
-            tuple: (output_filename, csv_content)
-        """
-        # Generate a unique filename for each record
-        unique_id = str(uuid.uuid4())
-        output_filename = f'record_{unique_id}.csv'
-        
-        # Convert the record to a CSV string
-        output = io.StringIO()
-        writer = csv.writer(output)
-        
-        # Write headers
-        writer.writerow(element.keys())
-        
-        # Write data
-        writer.writerow(element.values())
-        
-        return (output_filename, output.getvalue())
-    
-    def upload_to_gcs(self, record):
-        """
-        Upload a single CSV record to GCS.
-        
-        Args:
-            record (tuple): (filename, file_content)
-        """
-        filename, content = record
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(self.OUTPUT_BUCKET)
-        blob = bucket.blob(f"{self.OUTPUT_PATH}{filename}")
-        
-        blob.upload_from_string(content)
-        print(f"File {filename} uploaded to {self.OUTPUT_BUCKET}")
-    
-    def run(self):
-        """
-        Execute the Avro to CSV conversion pipeline.
-        """
-        with beam.Pipeline(options=self.pipeline_options) as p:
-            # Read Avro file
-            records = p | 'Read Avro' >> ReadFromAvro(self.INPUT_AVRO_PATH)
-            
-            # Convert records to CSV
-            csv_records = records | 'Convert to CSV' >> beam.Map(self.convert_to_csv)
-            
-            # Upload each CSV to GCS
-            csv_records | 'Upload to GCS' >> beam.Map(self.upload_to_gcs)
+# Define your Pub/Sub subscription and GCS bucket details
+project_id = "vz-it-np-gudv-dev-vzntdo-0"
+subscription_id = "wireline_churn_test_topic-sub"
+subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
+gcs_bucket = "vznet-test"
+gcs_output_path = "wireline_churn_test/tgt/customer_profile"
 
-def main():
-    """
-    Main entry point for the Avro to CSV Dataflow pipeline.
-    """
-    pipeline = AvroToCsvPipeline()
-    pipeline.run()
+# Avro schema
+schema = [
+    "ont_activation_date",
+    "data_circuit_id",
+    "circuit_id",
+    "video_circuit_id",
+    "service_type",
+    "address_id",
+    "vision_account_id",
+    "vision_customer_id",
+    "address_type",
+    "line_of_business"
+]
+
+# Function to parse Avro messages
+def parse_avro_message(message):
+    try:
+        avro_bytes = message.data
+        avro_file = io.BytesIO(avro_bytes)
+        avro_reader = reader(avro_file)
+        for record in avro_reader:
+            yield (record.get("address_id", "unknown"), record)
+    except Exception as e:
+        print(f"Error parsing Avro message: {e}")
+
+# Function to format grouped records into CSV
+def format_grouped_records(key_and_records: typing.Tuple[str, typing.Iterable[dict]]) -> str:
+    key, records = key_and_records
+    # Convert records to a list
+    records = list(records)  
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=schema)
+    writer.writeheader()
+    for record in records:
+        writer.writerow(record)
+    return output.getvalue()
+
+pipeline_options = PipelineOptions(
+    streaming=True,
+    project=project_id,
+    temp_location=f"gs://{gcs_bucket}/wireline_churn_test/tmp",
+    region="us-central1"
+)
+
+def run_pipeline():
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        messages = (
+            pipeline
+            | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
+        )
+        windowed_data = (
+            messages
+            | "WindowIntoFixed" >> beam.WindowInto(
+                FixedWindows(60),  # 1-minute windows
+                trigger=AfterWatermark(
+                    early=AfterProcessingTime(30),  # Emit partial results after 30 seconds
+                    late=AfterProcessingTime(60)    # Wait an additional 60 seconds for late data
+                ),
+                accumulation_mode=AccumulationMode.DISCARDING
+            )
+        )
+        
+        # Step 3: Parse Avro messages and assign keys
+        parsed_data = (
+            windowed_data
+            | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)
+        )
+        
+        # Step 4: Group by Key within the window
+        grouped_data = (
+            parsed_data
+            | "GroupByKey" >> beam.GroupByKey()
+        )
+        
+        # Step 5: Format grouped records as CSV
+        csv_data = (
+            grouped_data
+            | "FormatToCSV" >> beam.Map(format_grouped_records)
+        )
+        
+        # Step 6: Write the CSV data to GCS
+        csv_data | "WriteToGCS" >> beam.io.WriteToText(
+            f"gs://{gcs_bucket}/{gcs_output_path}",
+            file_name_suffix=".csv",
+            shard_name_template="-SS"  # Minimal sharding to ensure unique filenames
+        )
 
 if __name__ == '__main__':
-    main()
-
-# Pre-Execution Checklist:
-# 1. Replace 'your-project-id' with actual GCP project ID
-# 2. Update INPUT_AVRO_PATH with full GCS path to input Avro file
-# 3. Set OUTPUT_BUCKET to your target GCS bucket
-# 4. Ensure you have necessary GCP permissions
-# 5. Authenticate with GCP before running
+    run_pipeline()
