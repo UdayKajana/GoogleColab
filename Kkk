@@ -1,128 +1,169 @@
 import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.transforms.window import FixedWindows
-from apache_beam.transforms.trigger import AfterWatermark, AfterProcessingTime, Repeatedly, AccumulationMode
-from fastavro import reader
-import io
+from apache_beam.io.avroio import ReadFromAvro
+from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions, GoogleCloudOptions, SetupOptions
 import csv
-import typing
+import io
+import uuid
+from google.cloud import storage
+import argparse
 
-# Define your Pub/Sub subscription and GCS bucket details
-project_id = "vz-it-np-gudv-dev-vzntdo-0"
-subscription_id = "wireline_churn_test_topic-sub"
-subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
-gcs_bucket = "vznet-test"
-gcs_output_path = "wireline_churn_test/tgt/customer_profile"
-
-# Avro schema
-schema = [
-    "ont_activation_date",
-    "data_circuit_id",
-    "circuit_id",
-    "video_circuit_id",
-    "service_type",
-    "address_id",
-    "vision_account_id",
-    "vision_customer_id",
-    "address_type",
-    "line_of_business"
-]
-
-# Function to parse Avro messages
-def parse_avro_message(message):
-    """
-    Parse Avro message and yield records with address_id as key
+class AvroToCsvPipeline:
+    def __init__(self):
+        """
+        Initialize the Avro to CSV conversion pipeline with configurable options.
+        """
+        # Parse command-line arguments
+        self.parse_arguments()
+        
+        # Configure pipeline options
+        self.pipeline_options = self.configure_pipeline_options()
     
-    Args:
-        message: Pub/Sub message containing Avro-encoded data
+    def parse_arguments(self):
+        """
+        Define and parse command-line arguments for the pipeline.
+        """
+        parser = argparse.ArgumentParser(description='Avro to CSV Dataflow Pipeline')
+        
+        # Input and output configurations
+        parser.add_argument('--input_avro', 
+                            required=True, 
+                            help='Full path to the input Avro file in GCS (gs://bucket/path/file.avro)')
+        parser.add_argument('--output_bucket', 
+                            required=True, 
+                            help='GCS bucket name for output CSVs (bucket-name)')
+        parser.add_argument('--output_path', 
+                            default='avro_to_csv_output/', 
+                            help='Output path within the bucket (default: avro_to_csv_output/)')
+        
+        # GCP Project and Dataflow configurations
+        parser.add_argument('--project', 
+                            required=True, 
+                            help='Google Cloud Project ID')
+        parser.add_argument('--region', 
+                            default='us-central1', 
+                            help='GCP region for Dataflow job (default: us-central1)')
+        parser.add_argument('--staging_location', 
+                            help='GCS staging location (gs://bucket/staging)')
+        parser.add_argument('--temp_location', 
+                            help='GCS temporary location (gs://bucket/temp)')
+        
+        # Runner configuration
+        parser.add_argument('--runner', 
+                            default='DataflowRunner', 
+                            choices=['DirectRunner', 'DataflowRunner'], 
+                            help='Pipeline runner (default: DataflowRunner)')
+        
+        # Parse the arguments
+        self.args = parser.parse_args()
     
-    Yields:
-        Tuple of (address_id, record)
-    """
-    try:
-        avro_bytes = message.data
-        avro_file = io.BytesIO(avro_bytes)
-        avro_reader = reader(avro_file)
-        for record in avro_reader:
-            # Use address_id as the key for grouping
-            yield (record.get("address_id", "unknown"), record)
-    except Exception as e:
-        # Log or handle parsing errors
-        print(f"Error parsing Avro message: {e}")
-
-# Function to format grouped records into CSV
-def format_grouped_records(key_and_records: typing.Tuple[str, typing.List[dict]]) -> str:
-    """
-    Convert grouped records to CSV format
+    def configure_pipeline_options(self):
+        """
+        Configure comprehensive pipeline options for Dataflow.
+        
+        Returns:
+            PipelineOptions: Configured pipeline options
+        """
+        # Create pipeline options
+        options = PipelineOptions()
+        
+        # Set Google Cloud specific configurations
+        google_cloud_options = options.view_as(GoogleCloudOptions)
+        google_cloud_options.project = self.args.project
+        google_cloud_options.region = self.args.region
+        
+        # Set staging and temp locations (if provided)
+        if self.args.staging_location:
+            google_cloud_options.staging_location = self.args.staging_location
+        else:
+            # Auto-generate staging location if not provided
+            google_cloud_options.staging_location = f'gs://{self.args.output_bucket}/staging'
+        
+        if self.args.temp_location:
+            google_cloud_options.temp_location = self.args.temp_location
+        else:
+            # Auto-generate temp location if not provided
+            google_cloud_options.temp_location = f'gs://{self.args.output_bucket}/temp'
+        
+        # Set runner
+        options.view_as(StandardOptions).runner = self.args.runner
+        
+        # Disable manual job name generation if using DataflowRunner
+        if self.args.runner == 'DataflowRunner':
+            google_cloud_options.job_name = f'avro-to-csv-{uuid.uuid4().hex[:10]}'
+        
+        # Configure setup options
+        setup_options = options.view_as(SetupOptions)
+        setup_options.save_main_session = True
+        
+        return options
     
-    Args:
-        key_and_records: Tuple of (key, list of records)
+    def convert_to_csv(self, element):
+        """
+        Convert a single Avro record to a CSV string.
+        
+        Args:
+            element (dict): A single Avro record
+        
+        Returns:
+            tuple: (output_filename, csv_content)
+        """
+        # Generate a unique filename for each record
+        unique_id = str(uuid.uuid4())
+        output_filename = f'record_{unique_id}.csv'
+        
+        # Convert the record to a CSV string
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write headers
+        writer.writerow(element.keys())
+        
+        # Write data
+        writer.writerow(element.values())
+        
+        return (output_filename, output.getvalue())
     
-    Returns:
-        CSV-formatted string of records
+    def upload_to_gcs(self, record):
+        """
+        Upload a single CSV record to GCS.
+        
+        Args:
+            record (tuple): (filename, file_content)
+        """
+        filename, content = record
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(self.args.output_bucket)
+        blob = bucket.blob(f"{self.args.output_path}{filename}")
+        
+        blob.upload_from_string(content)
+        print(f"File {filename} uploaded to {self.args.output_bucket}")
+    
+    def run(self):
+        """
+        Execute the Avro to CSV conversion pipeline.
+        """
+        with beam.Pipeline(options=self.pipeline_options) as p:
+            # Read Avro file
+            records = p | 'Read Avro' >> ReadFromAvro(self.args.input_avro)
+            
+            # Convert records to CSV
+            csv_records = records | 'Convert to CSV' >> beam.Map(self.convert_to_csv)
+            
+            # Upload each CSV to GCS
+            csv_records | 'Upload to GCS' >> beam.Map(self.upload_to_gcs)
+
+def main():
     """
-    key, records = key_and_records
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=schema)
-    writer.writeheader()
-    for record in records:
-        writer.writerow(record)
-    return output.getvalue()
-
-# Define the Beam pipeline options
-pipeline_options = PipelineOptions(
-    streaming=True,
-    project=project_id,
-    temp_location=f"gs://{gcs_bucket}/temp",
-    region="us-central1"
-)
-
-# Define the Beam pipeline
-def run_pipeline():
-    with beam.Pipeline(options=pipeline_options) as pipeline:
-        # Step 1: Read messages from Pub/Sub
-        messages = (
-            pipeline
-            | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
-        )
-        
-        # Step 2: Apply Windowing with Trigger
-        windowed_data = (
-            messages
-            | "WindowIntoFixed" >> beam.WindowInto(
-                FixedWindows(60),  # 1-minute windows
-                trigger=AfterWatermark(
-                    early=AfterProcessingTime(30),  # Emit partial results after 30 seconds
-                    late=AfterProcessingTime(60)    # Wait an additional 60 seconds for late data
-                ),
-                accumulation_mode=AccumulationMode.DISCARDING
-            )
-        )
-        
-        # Step 3: Parse Avro messages and assign keys
-        parsed_data = (
-            windowed_data
-            | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)
-        )
-        
-        # Step 4: Group by Key within the window
-        grouped_data = (
-            parsed_data
-            | "GroupByKey" >> beam.GroupByKey()
-        )
-        
-        # Step 5: Format grouped records as CSV
-        csv_data = (
-            grouped_data
-            | "FormatToCSV" >> beam.Map(format_grouped_records)
-        )
-        
-        # Step 6: Write the CSV data to GCS
-        csv_data | "WriteToGCS" >> beam.io.WriteToText(
-            f"gs://{gcs_bucket}/{gcs_output_path}",
-            file_name_suffix=".csv",
-            shard_name_template="-SS"  # Minimal sharding to ensure unique filenames
-        )
+    Main entry point for the Avro to CSV Dataflow pipeline.
+    """
+    pipeline = AvroToCsvPipeline()
+    pipeline.run()
 
 if __name__ == '__main__':
-    run_pipeline()
+    main()
+
+# Example usage command (for local reference):
+# python avro_to_csv_dataflow.py \
+#     --input_avro=gs://your-input-bucket/input.avro \
+#     --output_bucket=your-output-bucket \
+#     --project=your-gcp-project
