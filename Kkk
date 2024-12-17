@@ -1,469 +1,83 @@
-Workflow failed. Causes: S06:ref_AppliedPTransform_Read-JSON-Read-SDFBoundedSourceReader-ParDo-SDFBoundedSourceDoFn-_7/ProcessElementAndRestrictionWithSizing+Parse JSON+Transform Data+Dict To CSV+Write CSV/Write/WriteImpl/WindowInto(WindowIntoFn)+Write CSV/Write/WriteImpl/WriteBundles+Write CSV/Write/WriteImpl/Pair+Write CSV/Write/WriteImpl/GroupByKey/Write failed., The job failed because a work item has failed 4 times. Look in previous log entries for the cause of each one of the 4 failures. If the logs only contain generic timeout errors related to accessing external resources, such as MongoDB, verify that the worker service account has permission to access the resource's subnetwork. For more information, see https://cloud.google.com/dataflow/docs/guides/common-errors. The work item was attempted on these workers: 
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from google.cloud import pubsub_v1
+from apache_beam.transforms.window import FixedWindows
+from fastavro import reader
+import io
+import csv
 
-      Root cause: Traceback (most recent call last):
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1)
+# Define your Pub/Sub topic and subscription
+project_id = "vz-it-np-gudv-dev-vzntdo-0"
+subscription_id = "wireline_churn_test_topic-sub"
+subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
 
-During handling of the above exception, another exception occurred:
+# Define your GCS bucket and file path
+gcs_bucket = "vznet-test"
+gcs_file_path = "wireline_churn_test/tgt/customer_profile.csv"
 
-Traceback (most recent call last):
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 311, in _execute
-    response = task()
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 386, in <lambda>
-    lambda: self.create_worker().do_instruction(request), request)
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 656, in do_instruction
-    return getattr(self, request_type)(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 694, in process_bundle
-    bundle_processor.process_bundle(instruction_id))
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 1119, in process_bundle
-    input_op_by_transform_id[element.transform_id].process_encoded(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 237, in process_encoded
-    self.output(decoded_value)
-  File "apache_beam/runners/worker/operations.py", line 569, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 571, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 262, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 1066, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/worker/operations.py", line 1075, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/common.py", line 1467, in apache_beam.runners.common.DoFnRunner.process_with_sized_restriction
-  File "apache_beam/runners/common.py", line 841, in apache_beam.runners.common.PerWindowInvoker.invoke_process
-  File "apache_beam/runners/common.py", line 997, in apache_beam.runners.common.PerWindowInvoker._invoke_process_per_window
-  File "apache_beam/runners/common.py", line 1621, in apache_beam.runners.common._OutputHandler.handle_process_outputs
-  File "apache_beam/runners/common.py", line 1734, in apache_beam.runners.common._OutputHandler._write_value_to_tag
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 952, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/worker/operations.py", line 953, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/common.py", line 1437, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 1547, in apache_beam.runners.common.DoFnRunner._reraise_augmented
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-RuntimeError: json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1) [while running 'Parse JSON-ptransform-60']
-
-      Worker ID: wireline-churn-scoring-12140209-kvjg-harness-fgv7,
-
-      Root cause: Traceback (most recent call last):
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1)
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 311, in _execute
-    response = task()
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 386, in <lambda>
-    lambda: self.create_worker().do_instruction(request), request)
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 656, in do_instruction
-    return getattr(self, request_type)(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 694, in process_bundle
-    bundle_processor.process_bundle(instruction_id))
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 1119, in process_bundle
-    input_op_by_transform_id[element.transform_id].process_encoded(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 237, in process_encoded
-    self.output(decoded_value)
-  File "apache_beam/runners/worker/operations.py", line 569, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 571, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 262, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 1066, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/worker/operations.py", line 1075, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/common.py", line 1467, in apache_beam.runners.common.DoFnRunner.process_with_sized_restriction
-  File "apache_beam/runners/common.py", line 841, in apache_beam.runners.common.PerWindowInvoker.invoke_process
-  File "apache_beam/runners/common.py", line 997, in apache_beam.runners.common.PerWindowInvoker._invoke_process_per_window
-  File "apache_beam/runners/common.py", line 1621, in apache_beam.runners.common._OutputHandler.handle_process_outputs
-  File "apache_beam/runners/common.py", line 1734, in apache_beam.runners.common._OutputHandler._write_value_to_tag
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 952, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/worker/operations.py", line 953, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/common.py", line 1437, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 1547, in apache_beam.runners.common.DoFnRunner._reraise_augmented
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-RuntimeError: json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1) [while running 'Parse JSON-ptransform-60']
-
-      Worker ID: wireline-churn-scoring-12140209-kvjg-harness-fgv7,
-
-      Root cause: Traceback (most recent call last):
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1)
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 311, in _execute
-    response = task()
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 386, in <lambda>
-    lambda: self.create_worker().do_instruction(request), request)
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 656, in do_instruction
-    return getattr(self, request_type)(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 694, in process_bundle
-    bundle_processor.process_bundle(instruction_id))
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 1119, in process_bundle
-    input_op_by_transform_id[element.transform_id].process_encoded(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 237, in process_encoded
-    self.output(decoded_value)
-  File "apache_beam/runners/worker/operations.py", line 569, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 571, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 262, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 1066, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/worker/operations.py", line 1075, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/common.py", line 1467, in apache_beam.runners.common.DoFnRunner.process_with_sized_restriction
-  File "apache_beam/runners/common.py", line 841, in apache_beam.runners.common.PerWindowInvoker.invoke_process
-  File "apache_beam/runners/common.py", line 997, in apache_beam.runners.common.PerWindowInvoker._invoke_process_per_window
-  File "apache_beam/runners/common.py", line 1621, in apache_beam.runners.common._OutputHandler.handle_process_outputs
-  File "apache_beam/runners/common.py", line 1734, in apache_beam.runners.common._OutputHandler._write_value_to_tag
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 952, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/worker/operations.py", line 953, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/common.py", line 1437, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 1547, in apache_beam.runners.common.DoFnRunner._reraise_augmented
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-RuntimeError: json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1) [while running 'Parse JSON-ptransform-60']
-
-      Worker ID: wireline-churn-scoring-12140209-kvjg-harness-fgv7,
-
-      Root cause: Traceback (most recent call last):
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1)
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 311, in _execute
-    response = task()
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 386, in <lambda>
-    lambda: self.create_worker().do_instruction(request), request)
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 656, in do_instruction
-    return getattr(self, request_type)(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 694, in process_bundle
-    bundle_processor.process_bundle(instruction_id))
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 1119, in process_bundle
-    input_op_by_transform_id[element.transform_id].process_encoded(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 237, in process_encoded
-    self.output(decoded_value)
-  File "apache_beam/runners/worker/operations.py", line 569, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 571, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 262, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 1066, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/worker/operations.py", line 1075, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/common.py", line 1467, in apache_beam.runners.common.DoFnRunner.process_with_sized_restriction
-  File "apache_beam/runners/common.py", line 841, in apache_beam.runners.common.PerWindowInvoker.invoke_process
-  File "apache_beam/runners/common.py", line 997, in apache_beam.runners.common.PerWindowInvoker._invoke_process_per_window
-  File "apache_beam/runners/common.py", line 1621, in apache_beam.runners.common._OutputHandler.handle_process_outputs
-  File "apache_beam/runners/common.py", line 1734, in apache_beam.runners.common._OutputHandler._write_value_to_tag
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 952, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/worker/operations.py", line 953, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/common.py", line 1437, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 1547, in apache_beam.runners.common.DoFnRunner._reraise_augmented
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-RuntimeError: json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1) [while running 'Parse JSON-ptransform-60']
-
-      Worker ID: wireline-churn-scoring-12140209-kvjg-harness-fgv7
-{
-errorGroups: [1]
-httpRequest: null
-insertId: "1prrnlcfws"
-jsonPayload: null
-labels: {4}
-logName: "projects/vz-it-np-gudv-dev-dtwndo-0/logs/dataflow.googleapis.com%2Fjob-message"
-operation: null
-payload: "textPayload"
-protoPayload: null
-receiveLocation: "us-east4"
-receiveTimestamp: "2024-12-14T10:12:35.893363594Z"
-resource: {2}
-severity: "ERROR"
-sourceLocation: null
-split: null
-textPayload: "Workflow failed. Causes: S06:ref_AppliedPTransform_Read-JSON-Read-SDFBoundedSourceReader-ParDo-SDFBoundedSourceDoFn-_7/ProcessElementAndRestrictionWithSizing+Parse JSON+Transform Data+Dict To CSV+Write CSV/Write/WriteImpl/WindowInto(WindowIntoFn)+Write CSV/Write/WriteImpl/WriteBundles+Write CSV/Write/WriteImpl/Pair+Write CSV/Write/WriteImpl/GroupByKey/Write failed., The job failed because a work item has failed 4 times. Look in previous log entries for the cause of each one of the 4 failures. If the logs only contain generic timeout errors related to accessing external resources, such as MongoDB, verify that the worker service account has permission to access the resource's subnetwork. For more information, see https://cloud.google.com/dataflow/docs/guides/common-errors. The work item was attempted on these workers: 
-
-      Root cause: Traceback (most recent call last):
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1)
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 311, in _execute
-    response = task()
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 386, in <lambda>
-    lambda: self.create_worker().do_instruction(request), request)
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 656, in do_instruction
-    return getattr(self, request_type)(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 694, in process_bundle
-    bundle_processor.process_bundle(instruction_id))
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 1119, in process_bundle
-    input_op_by_transform_id[element.transform_id].process_encoded(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 237, in process_encoded
-    self.output(decoded_value)
-  File "apache_beam/runners/worker/operations.py", line 569, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 571, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 262, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 1066, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/worker/operations.py", line 1075, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/common.py", line 1467, in apache_beam.runners.common.DoFnRunner.process_with_sized_restriction
-  File "apache_beam/runners/common.py", line 841, in apache_beam.runners.common.PerWindowInvoker.invoke_process
-  File "apache_beam/runners/common.py", line 997, in apache_beam.runners.common.PerWindowInvoker._invoke_process_per_window
-  File "apache_beam/runners/common.py", line 1621, in apache_beam.runners.common._OutputHandler.handle_process_outputs
-  File "apache_beam/runners/common.py", line 1734, in apache_beam.runners.common._OutputHandler._write_value_to_tag
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 952, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/worker/operations.py", line 953, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/common.py", line 1437, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 1547, in apache_beam.runners.common.DoFnRunner._reraise_augmented
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-RuntimeError: json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1) [while running 'Parse JSON-ptransform-60']
-
-      Worker ID: wireline-churn-scoring-12140209-kvjg-harness-fgv7,
-
-      Root cause: Traceback (most recent call last):
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1)
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 311, in _execute
-    response = task()
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 386, in <lambda>
-    lambda: self.create_worker().do_instruction(request), request)
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 656, in do_instruction
-    return getattr(self, request_type)(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 694, in process_bundle
-    bundle_processor.process_bundle(instruction_id))
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 1119, in process_bundle
-    input_op_by_transform_id[element.transform_id].process_encoded(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 237, in process_encoded
-    self.output(decoded_value)
-  File "apache_beam/runners/worker/operations.py", line 569, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 571, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 262, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 1066, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/worker/operations.py", line 1075, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/common.py", line 1467, in apache_beam.runners.common.DoFnRunner.process_with_sized_restriction
-  File "apache_beam/runners/common.py", line 841, in apache_beam.runners.common.PerWindowInvoker.invoke_process
-  File "apache_beam/runners/common.py", line 997, in apache_beam.runners.common.PerWindowInvoker._invoke_process_per_window
-  File "apache_beam/runners/common.py", line 1621, in apache_beam.runners.common._OutputHandler.handle_process_outputs
-  File "apache_beam/runners/common.py", line 1734, in apache_beam.runners.common._OutputHandler._write_value_to_tag
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 952, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/worker/operations.py", line 953, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/common.py", line 1437, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 1547, in apache_beam.runners.common.DoFnRunner._reraise_augmented
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-RuntimeError: json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1) [while running 'Parse JSON-ptransform-60']
-
-      Worker ID: wireline-churn-scoring-12140209-kvjg-harness-fgv7,
-
-      Root cause: Traceback (most recent call last):
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1)
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 311, in _execute
-    response = task()
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 386, in <lambda>
-    lambda: self.create_worker().do_instruction(request), request)
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 656, in do_instruction
-    return getattr(self, request_type)(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 694, in process_bundle
-    bundle_processor.process_bundle(instruction_id))
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 1119, in process_bundle
-    input_op_by_transform_id[element.transform_id].process_encoded(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 237, in process_encoded
-    self.output(decoded_value)
-  File "apache_beam/runners/worker/operations.py", line 569, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 571, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 262, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 1066, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/worker/operations.py", line 1075, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/common.py", line 1467, in apache_beam.runners.common.DoFnRunner.process_with_sized_restriction
-  File "apache_beam/runners/common.py", line 841, in apache_beam.runners.common.PerWindowInvoker.invoke_process
-  File "apache_beam/runners/common.py", line 997, in apache_beam.runners.common.PerWindowInvoker._invoke_process_per_window
-  File "apache_beam/runners/common.py", line 1621, in apache_beam.runners.common._OutputHandler.handle_process_outputs
-  File "apache_beam/runners/common.py", line 1734, in apache_beam.runners.common._OutputHandler._write_value_to_tag
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 952, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/worker/operations.py", line 953, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/common.py", line 1437, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 1547, in apache_beam.runners.common.DoFnRunner._reraise_augmented
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-RuntimeError: json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1) [while running 'Parse JSON-ptransform-60']
-
-      Worker ID: wireline-churn-scoring-12140209-kvjg-harness-fgv7,
-
-      Root cause: Traceback (most recent call last):
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1)
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 311, in _execute
-    response = task()
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 386, in <lambda>
-    lambda: self.create_worker().do_instruction(request), request)
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 656, in do_instruction
-    return getattr(self, request_type)(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 694, in process_bundle
-    bundle_processor.process_bundle(instruction_id))
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 1119, in process_bundle
-    input_op_by_transform_id[element.transform_id].process_encoded(
-  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 237, in process_encoded
-    self.output(decoded_value)
-  File "apache_beam/runners/worker/operations.py", line 569, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 571, in apache_beam.runners.worker.operations.Operation.output
-  File "apache_beam/runners/worker/operations.py", line 262, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 1066, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/worker/operations.py", line 1075, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
-  File "apache_beam/runners/common.py", line 1467, in apache_beam.runners.common.DoFnRunner.process_with_sized_restriction
-  File "apache_beam/runners/common.py", line 841, in apache_beam.runners.common.PerWindowInvoker.invoke_process
-  File "apache_beam/runners/common.py", line 997, in apache_beam.runners.common.PerWindowInvoker._invoke_process_per_window
-  File "apache_beam/runners/common.py", line 1621, in apache_beam.runners.common._OutputHandler.handle_process_outputs
-  File "apache_beam/runners/common.py", line 1734, in apache_beam.runners.common._OutputHandler._write_value_to_tag
-  File "apache_beam/runners/worker/operations.py", line 265, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
-  File "apache_beam/runners/worker/operations.py", line 952, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/worker/operations.py", line 953, in apache_beam.runners.worker.operations.DoOperation.process
-  File "apache_beam/runners/common.py", line 1437, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 1547, in apache_beam.runners.common.DoFnRunner._reraise_augmented
-  File "apache_beam/runners/common.py", line 1435, in apache_beam.runners.common.DoFnRunner.process
-  File "apache_beam/runners/common.py", line 640, in apache_beam.runners.common.SimpleInvoker.invoke_process
-  File "/home/sL_dtwin/wireline_churn_scoring.py", line 8, in process
-  File "/usr/local/lib/python3.9/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/local/lib/python3.9/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/local/lib/python3.9/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-RuntimeError: json.decoder.JSONDecodeError: Expecting value: line 1 column 2 (char 1) [while running 'Parse JSON-ptransform-60']
-
-      Worker ID: wireline-churn-scoring-12140209-kvjg-harness-fgv7"
-timestamp: "2024-12-14T10:12:34.108250458Z"
-traceSampled: false
+# Avro schema
+schema = {
+    "namespace": "example.avro",
+    "type": "record",
+    "name": "customerprofile",
+    "fields": [
+        {"name": "ont_activation_date", "type": ["string", "null"]},
+        {"name": "data_circuit_id", "type": ["string", "null"]},
+        {"name": "circuit_id", "type": ["string", "null"]},
+        {"name": "video_circuit_id", "type": ["string", "null"]},
+        {"name": "service_type", "type": ["string", "null"]},
+        {"name": "address_id", "type": "long"},
+        {"name": "vision_account_id", "type": ["string", "null"]},
+        {"name": "vision_customer_id", "type": ["string", "null"]},
+        {"name": "address_type", "type": ["string", "null"]},
+        {"name": "line_of_business", "type": ["string", "null"]}
+    ]
 }
+
+def parse_avro_message(message):
+    avro_bytes = message.data
+    avro_file = io.BytesIO(avro_bytes)
+    avro_reader = reader(avro_file)
+    for record in avro_reader:
+        yield record.values()
+
+def format_csv_line(record):
+    """Formats a record as a CSV line."""
+    return ','.join(str(field) for field in record)
+
+# Create a Beam pipeline
+with beam.Pipeline(options=PipelineOptions()) as pipeline:
+    # Read messages from Pub/Sub
+    messages = (
+        pipeline
+        | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
+    )
+    windowed_data = (
+        messages
+        | "windowing" >> beam.WindowInto(FixedWindows(60)) # Window into 1-minute intervals
+    )
+    # Parse Avro messages
+    parsed_data = (
+        windowed_data
+        | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)
+    )
+
+    gbk = (
+        parsed_data | "GroupByKey" >> beam.GroupByKey()
+    )
+
+    # Format as CSV
+    csv_lines = (
+        gbk
+        | "FormatCSVLines" >> beam.Map(format_csv_line)
+    )
+
+    # Write to GCS
+    (
+        csv_lines
+        | "WriteToGCS" >> beam.io.WriteToText(
+            f"gs://{gcs_bucket}/{gcs_file_path}",
+            header=','.join(field['name'] for field in schema['fields']),
+            file_name_suffix=".csv",
+        )
+    )
