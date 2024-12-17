@@ -1,10 +1,11 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.transforms.window import FixedWindows
-from apache_beam.transforms.trigger import AfterProcessingTime, Repeatedly, AccumulationMode
+from apache_beam.transforms.trigger import AfterWatermark, AfterProcessingTime, Repeatedly, AccumulationMode
 from fastavro import reader
 import io
 import csv
+import typing
 
 # Define your Pub/Sub subscription and GCS bucket details
 project_id = "vz-it-np-gudv-dev-vzntdo-0"
@@ -29,15 +30,37 @@ schema = [
 
 # Function to parse Avro messages
 def parse_avro_message(message):
-    avro_bytes = message.data
-    avro_file = io.BytesIO(avro_bytes)
-    avro_reader = reader(avro_file)
-    for record in avro_reader:
-        # Use a key (e.g., address_id) for grouping
-        yield (record["address_id"], record)
+    """
+    Parse Avro message and yield records with address_id as key
+    
+    Args:
+        message: Pub/Sub message containing Avro-encoded data
+    
+    Yields:
+        Tuple of (address_id, record)
+    """
+    try:
+        avro_bytes = message.data
+        avro_file = io.BytesIO(avro_bytes)
+        avro_reader = reader(avro_file)
+        for record in avro_reader:
+            # Use address_id as the key for grouping
+            yield (record.get("address_id", "unknown"), record)
+    except Exception as e:
+        # Log or handle parsing errors
+        print(f"Error parsing Avro message: {e}")
 
 # Function to format grouped records into CSV
-def format_grouped_records(key_and_records):
+def format_grouped_records(key_and_records: typing.Tuple[str, typing.List[dict]]) -> str:
+    """
+    Convert grouped records to CSV format
+    
+    Args:
+        key_and_records: Tuple of (key, list of records)
+    
+    Returns:
+        CSV-formatted string of records
+    """
     key, records = key_and_records
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=schema)
@@ -55,44 +78,51 @@ pipeline_options = PipelineOptions(
 )
 
 # Define the Beam pipeline
-with beam.Pipeline(options=pipeline_options) as pipeline:
-    # Step 1: Read messages from Pub/Sub
-    messages = (
-        pipeline
-        | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
-    )
-
-    # Step 2: Apply Fixed Windowing
-    windowed_data = (
-        messages
-        | "WindowIntoFixed" >> beam.WindowInto(
-            FixedWindows(60),  # 1-minute windows
-            trigger=Repeatedly(AfterProcessingTime(30)),  # Emit every 30 seconds
-            accumulation_mode=AccumulationMode.DISCARDING
+def run_pipeline():
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        # Step 1: Read messages from Pub/Sub
+        messages = (
+            pipeline
+            | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
         )
-    )
+        
+        # Step 2: Apply Windowing with Trigger
+        windowed_data = (
+            messages
+            | "WindowIntoFixed" >> beam.WindowInto(
+                FixedWindows(60),  # 1-minute windows
+                trigger=AfterWatermark(
+                    early=AfterProcessingTime(30),  # Emit partial results after 30 seconds
+                    late=AfterProcessingTime(60)    # Wait an additional 60 seconds for late data
+                ),
+                accumulation_mode=AccumulationMode.DISCARDING
+            )
+        )
+        
+        # Step 3: Parse Avro messages and assign keys
+        parsed_data = (
+            windowed_data
+            | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)
+        )
+        
+        # Step 4: Group by Key within the window
+        grouped_data = (
+            parsed_data
+            | "GroupByKey" >> beam.GroupByKey()
+        )
+        
+        # Step 5: Format grouped records as CSV
+        csv_data = (
+            grouped_data
+            | "FormatToCSV" >> beam.Map(format_grouped_records)
+        )
+        
+        # Step 6: Write the CSV data to GCS
+        csv_data | "WriteToGCS" >> beam.io.WriteToText(
+            f"gs://{gcs_bucket}/{gcs_output_path}",
+            file_name_suffix=".csv",
+            shard_name_template="-SS"  # Minimal sharding to ensure unique filenames
+        )
 
-    # Step 3: Parse Avro messages and assign keys
-    parsed_data = (
-        windowed_data
-        | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)  # (key, record)
-    )
-
-    # Step 4: Group by Key within the window
-    grouped_data = (
-        parsed_data
-        | "GroupByKey" >> beam.GroupByKey()
-    )
-
-    # Step 5: Format grouped records as CSV
-    csv_data = (
-        grouped_data
-        | "FormatToCSV" >> beam.Map(format_grouped_records)
-    )
-
-    # Step 6: Write the CSV data to GCS
-    csv_data | "WriteToGCS" >> beam.io.WriteToText(
-        f"gs://{gcs_bucket}/{gcs_output_path}",
-        file_name_suffix=".csv",
-        shard_name_template=""  # Avoid file sharding
-    )
+if __name__ == '__main__':
+    run_pipeline()
