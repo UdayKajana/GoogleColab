@@ -5,60 +5,36 @@ import csv
 import io
 import uuid
 from google.cloud import storage
-import argparse
 
 class AvroToCsvPipeline:
     def __init__(self):
         """
-        Initialize the Avro to CSV conversion pipeline with configurable options.
+        Initialize the Avro to CSV conversion pipeline with hardcoded configurations.
         """
-        # Parse command-line arguments
-        self.parse_arguments()
+        # Hardcoded configuration parameters
+        self.PROJECT_ID = 'your-project-id'  # Replace with your GCP project ID
+        self.REGION = 'us-central1'  # GCP region for Dataflow job
+        
+        # Input Avro file configuration
+        self.INPUT_AVRO_PATH = 'gs://your-input-bucket/input.avro'  # Full path to input Avro file
+        
+        # Output CSV configuration
+        self.OUTPUT_BUCKET = 'your-output-bucket'  # GCS bucket for output
+        self.OUTPUT_PATH = 'avro_to_csv_output/'  # Path within the bucket
+        
+        # Staging and temp locations
+        self.STAGING_LOCATION = f'gs://{self.OUTPUT_BUCKET}/staging'
+        self.TEMP_LOCATION = f'gs://{self.OUTPUT_BUCKET}/temp'
+        
+        # Pipeline runner (DataflowRunner for cloud execution)
+        self.RUNNER = 'DataflowRunner'
         
         # Configure pipeline options
         self.pipeline_options = self.configure_pipeline_options()
     
-    def parse_arguments(self):
-        """
-        Define and parse command-line arguments for the pipeline.
-        """
-        parser = argparse.ArgumentParser(description='Avro to CSV Dataflow Pipeline')
-        
-        # Input and output configurations
-        parser.add_argument('--input_avro', 
-                            required=True, 
-                            help='Full path to the input Avro file in GCS (gs://bucket/path/file.avro)')
-        parser.add_argument('--output_bucket', 
-                            required=True, 
-                            help='GCS bucket name for output CSVs (bucket-name)')
-        parser.add_argument('--output_path', 
-                            default='avro_to_csv_output/', 
-                            help='Output path within the bucket (default: avro_to_csv_output/)')
-        
-        # GCP Project and Dataflow configurations
-        parser.add_argument('--project', 
-                            required=True, 
-                            help='Google Cloud Project ID')
-        parser.add_argument('--region', 
-                            default='us-central1', 
-                            help='GCP region for Dataflow job (default: us-central1)')
-        parser.add_argument('--staging_location', 
-                            help='GCS staging location (gs://bucket/staging)')
-        parser.add_argument('--temp_location', 
-                            help='GCS temporary location (gs://bucket/temp)')
-        
-        # Runner configuration
-        parser.add_argument('--runner', 
-                            default='DataflowRunner', 
-                            choices=['DirectRunner', 'DataflowRunner'], 
-                            help='Pipeline runner (default: DataflowRunner)')
-        
-        # Parse the arguments
-        self.args = parser.parse_args()
-    
     def configure_pipeline_options(self):
         """
-        Configure comprehensive pipeline options for Dataflow.
+        Configure comprehensive pipeline options for Dataflow with hardcoded settings.
         
         Returns:
             PipelineOptions: Configured pipeline options
@@ -68,28 +44,16 @@ class AvroToCsvPipeline:
         
         # Set Google Cloud specific configurations
         google_cloud_options = options.view_as(GoogleCloudOptions)
-        google_cloud_options.project = self.args.project
-        google_cloud_options.region = self.args.region
+        google_cloud_options.project = self.PROJECT_ID
+        google_cloud_options.region = self.REGION
+        google_cloud_options.staging_location = self.STAGING_LOCATION
+        google_cloud_options.temp_location = self.TEMP_LOCATION
         
-        # Set staging and temp locations (if provided)
-        if self.args.staging_location:
-            google_cloud_options.staging_location = self.args.staging_location
-        else:
-            # Auto-generate staging location if not provided
-            google_cloud_options.staging_location = f'gs://{self.args.output_bucket}/staging'
-        
-        if self.args.temp_location:
-            google_cloud_options.temp_location = self.args.temp_location
-        else:
-            # Auto-generate temp location if not provided
-            google_cloud_options.temp_location = f'gs://{self.args.output_bucket}/temp'
+        # Generate a unique job name
+        google_cloud_options.job_name = f'avro-to-csv-{uuid.uuid4().hex[:10]}'
         
         # Set runner
-        options.view_as(StandardOptions).runner = self.args.runner
-        
-        # Disable manual job name generation if using DataflowRunner
-        if self.args.runner == 'DataflowRunner':
-            google_cloud_options.job_name = f'avro-to-csv-{uuid.uuid4().hex[:10]}'
+        options.view_as(StandardOptions).runner = self.RUNNER
         
         # Configure setup options
         setup_options = options.view_as(SetupOptions)
@@ -132,11 +96,11 @@ class AvroToCsvPipeline:
         """
         filename, content = record
         storage_client = storage.Client()
-        bucket = storage_client.bucket(self.args.output_bucket)
-        blob = bucket.blob(f"{self.args.output_path}{filename}")
+        bucket = storage_client.bucket(self.OUTPUT_BUCKET)
+        blob = bucket.blob(f"{self.OUTPUT_PATH}{filename}")
         
         blob.upload_from_string(content)
-        print(f"File {filename} uploaded to {self.args.output_bucket}")
+        print(f"File {filename} uploaded to {self.OUTPUT_BUCKET}")
     
     def run(self):
         """
@@ -144,7 +108,7 @@ class AvroToCsvPipeline:
         """
         with beam.Pipeline(options=self.pipeline_options) as p:
             # Read Avro file
-            records = p | 'Read Avro' >> ReadFromAvro(self.args.input_avro)
+            records = p | 'Read Avro' >> ReadFromAvro(self.INPUT_AVRO_PATH)
             
             # Convert records to CSV
             csv_records = records | 'Convert to CSV' >> beam.Map(self.convert_to_csv)
@@ -162,8 +126,9 @@ def main():
 if __name__ == '__main__':
     main()
 
-# Example usage command (for local reference):
-# python avro_to_csv_dataflow.py \
-#     --input_avro=gs://your-input-bucket/input.avro \
-#     --output_bucket=your-output-bucket \
-#     --project=your-gcp-project
+# Pre-Execution Checklist:
+# 1. Replace 'your-project-id' with actual GCP project ID
+# 2. Update INPUT_AVRO_PATH with full GCS path to input Avro file
+# 3. Set OUTPUT_BUCKET to your target GCS bucket
+# 4. Ensure you have necessary GCP permissions
+# 5. Authenticate with GCP before running
