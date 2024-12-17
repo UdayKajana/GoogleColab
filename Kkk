@@ -1,11 +1,10 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.transforms.window import FixedWindows
-from apache_beam.transforms.trigger import AfterWatermark, AfterProcessingTime, Repeatedly, AccumulationMode
 from fastavro import reader
 import io
 import csv
 import typing
+import uuid
 
 # Define your Pub/Sub subscription and GCS bucket details
 project_id = "vz-it-np-gudv-dev-vzntdo-0"
@@ -34,23 +33,29 @@ def parse_avro_message(message):
         avro_bytes = message.data
         avro_file = io.BytesIO(avro_bytes)
         avro_reader = reader(avro_file)
+        
         for record in avro_reader:
-            yield (record.get("address_id", "unknown"), record)
+            yield record  # Yield each record individually
+
     except Exception as e:
         print(f"Error parsing Avro message: {e}")
 
-# Function to format grouped records into CSV
-def format_grouped_records(key_and_records: typing.Tuple[str, typing.Iterable[dict]]) -> str:
-    key, records = key_and_records
-    # Convert records to a list
-    records = list(records)  
+# Function to format a single record into CSV
+def format_to_csv(record: dict) -> str:
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=schema)
-    writer.writeheader()
-    for record in records:
-        writer.writerow(record)
+    writer.writeheader()  # Write header for the CSV
+    writer.writerow(record)  # Write the single record
     return output.getvalue()
 
+# Function to create a unique filename for each message
+def create_unique_filename(record: dict) -> typing.Tuple[str, str]:
+    csv_data = format_to_csv(record)
+    # Generate a unique filename using a UUID
+    filename = f"customer_profile_{uuid.uuid4()}.csv"
+    return filename, csv_data
+
+# Define pipeline options
 pipeline_options = PipelineOptions(
     streaming=True,
     project=project_id,
@@ -64,42 +69,83 @@ def run_pipeline():
             pipeline
             | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
         )
-        windowed_data = (
-            messages
-            | "WindowIntoFixed" >> beam.WindowInto(
-                FixedWindows(60),  # 1-minute windows
-                trigger=AfterWatermark(
-                    early=AfterProcessingTime(30),  # Emit partial results after 30 seconds
-                    late=AfterProcessingTime(60)    # Wait an additional 60 seconds for late data
-                ),
-                accumulation_mode=AccumulationMode.DISCARDING
-            )
-        )
-        
-        # Step 3: Parse Avro messages and assign keys
+
         parsed_data = (
-            windowed_data
+            messages
             | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)
         )
-        
-        # Step 4: Group by Key within the window
-        grouped_data = (
-            parsed_data
-            | "GroupByKey" >> beam.GroupByKey()
-        )
-        
-        # Step 5: Format grouped records as CSV
+
         csv_data = (
-            grouped_data
-            | "FormatToCSV" >> beam.Map(format_grouped_records)
+            parsed_data
+            | "FormatToCSV" >> beam.Map(create_unique_filename)  # Format and create unique filenames
         )
-        
-        # Step 6: Write the CSV data to GCS
-        csv_data | "WriteToGCS" >> beam.io.WriteToText(
-            f"gs://{gcs_bucket}/{gcs_output_path}",
+
+        # Step to write each CSV data to a unique file in GCS
+        csv_data | "WriteToGCS" >> beam.Map(lambda x: beam.io.WriteToText(
+            f"gs://{gcs_bucket}/{gcs_output_path}/{x[0]}",
             file_name_suffix=".csv",
-            shard_name_template="-SS"  # Minimal sharding to ensure unique filenames
-        )
+            num_shards=1  # Control number of shards if desired
+        ))
 
 if __name__ == '__main__':
     run_pipeline()
+
+def parse_avro_message(message):
+    try:
+        avro_bytes = message.data
+        avro_file = io.BytesIO(avro_bytes)
+        avro_reader = reader(avro_file)
+        
+        records = []
+        for record in avro_reader:
+            records.append(record)  # Accumulate records into a list
+        
+        yield records  # Yield the entire batch of records
+    except Exception as e:
+        print(f"Error parsing Avro message: {e}")
+
+def format_to_csv(records: typing.List[dict]) -> str:
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=schema)
+
+    writer.writeheader()  # Write header for the CSV
+    for record in records:
+        writer.writerow(record)  # Write each record
+
+    return output.getvalue()
+
+def create_unique_filename(records: typing.List[dict]) -> typing.Tuple[str, str]:
+    csv_data = format_to_csv(records)
+
+    # Generate a unique filename using a UUID
+    filename = f"customer_profile_{uuid.uuid4()}.csv"
+
+    return filename, csv_data
+
+def run_pipeline():
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        messages = (
+            pipeline
+            | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
+        )
+
+        parsed_data = (
+            messages
+            | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)
+        )
+
+        csv_data = (
+            parsed_data
+            | "FormatToCSV" >> beam.Map(create_unique_filename)  # Format and create unique filenames
+        )
+
+        # Step to write CSV data to a unique file in GCS
+        csv_data | "WriteToGCS" >> beam.Map(lambda x: beam.io.WriteToText(
+            f"gs://{gcs_bucket}/{gcs_output_path}/{x[0]}",
+            file_name_suffix=".csv",
+            num_shards=1  # Control number of shards if desired
+        ))
+
+if __name__ == '__main__':
+    run_pipeline()
+
