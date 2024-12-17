@@ -1,84 +1,107 @@
 import io
-from google.cloud import pubsub_v1
-import pandas as pd
 import json
+import traceback
+import pandas as pd
+from google.cloud import pubsub_v1
 import avro.schema
 from avro.io import DatumReader, BinaryDecoder
 from io import BytesIO
-import traceback
 
-# Define the Avro schema as a JSON string
-schema_json = json.dumps({
-    "type": "record",
-    "name": "ChurnData",
-    "fields": [
-        {"name": "ont_activation_date", "type": ["null", "string"]},
-        {"name": "data_circuit_id", "type": ["null", "string"]},
-        {"name": "circuit_id", "type": ["null", "string"]},
-        {"name": "video_circuit_id", "type": ["null", "string"]},
-        {"name": "service_type", "type": ["null", "string"]},
-        {"name": "address_id", "type": ["null", "string"]},
-        {"name": "vision_account_id", "type": ["null", "string"]},
-        {"name": "vision_customer_id", "type": ["null", "string"]},
-        {"name": "address_type", "type": ["null", "string"]},
-        {"name": "line_of_business", "type": ["null", "string"]}
-    ]
-})
+def debug_avro_message(message_data):
+    """
+    Comprehensive debugging function to understand the Avro message structure
+    """
+    print("--- Message Data Debug ---")
+    print(f"Message type: {type(message_data)}")
+    print(f"Message length: {len(message_data) if hasattr(message_data, '__len__') else 'N/A'}")
+    
+    try:
+        # Try to inspect the first few bytes
+        print("First 50 bytes (hex):", message_data[:50].hex())
+    except Exception as e:
+        print(f"Could not print hex representation: {e}")
+
+def create_flexible_schema():
+    """
+    Create a flexible Avro schema that can handle various input types
+    """
+    return avro.schema.parse(json.dumps({
+        "type": "record",
+        "name": "FlexibleRecord",
+        "fields": [
+            {"name": "ont_activation_date", "type": ["null", "string", "int", "long"]},
+            {"name": "data_circuit_id", "type": ["null", "string", "int", "long"]},
+            {"name": "circuit_id", "type": ["null", "string", "int", "long"]},
+            {"name": "video_circuit_id", "type": ["null", "string", "int", "long"]},
+            {"name": "service_type", "type": ["null", "string", "int", "long"]},
+            {"name": "address_id", "type": ["null", "string", "int", "long"]},
+            {"name": "vision_account_id", "type": ["null", "string", "int", "long"]},
+            {"name": "vision_customer_id", "type": ["null", "string", "int", "long"]},
+            {"name": "address_type", "type": ["null", "string", "int", "long"]},
+            {"name": "line_of_business", "type": ["null", "string", "int", "long"]}
+        ]
+    }))
 
 def process_avro_message(message):
+    """
+    Robust Avro message processing with comprehensive error handling
+    """
     try:
-        # Print raw message data for debugging
-        print("Raw message data:", type(message.data))
+        # Debug the incoming message
+        debug_avro_message(message.data)
         
-        # Parse the Avro schema from JSON string
-        parsed_schema = avro.schema.parse(schema_json)
+        # Create a flexible schema
+        avro_schema = create_flexible_schema()
         
-        # Create a DatumReader with the schema
-        reader = DatumReader(parsed_schema)
-        
-        # Ensure we're working with bytes
-        if not isinstance(message.data, bytes):
-            print(f"Unexpected message data type: {type(message.data)}")
-            message.nack()
-            return None
-        
-        # Create BytesIO and BinaryDecoder
+        # Create readers with flexible handling
         bytes_reader = BytesIO(message.data)
         decoder = BinaryDecoder(bytes_reader)
+        reader = DatumReader(avro_schema)
         
         rows = []
         try:
-            # Attempt to read records
-            while True:
+            # Attempt multiple reading strategies
+            def safe_read_record():
+                """Safely read a single record with error handling"""
                 try:
-                    # Read a record using the schema
                     record = reader.read(decoder)
-                    
-                    # Process the record
                     processed_record = {}
-                    for field in parsed_schema.fields:
-                        field_name = field.name
-                        value = record.get(field_name)
-                        
-                        # Handle various value types
-                        if value is None:
-                            processed_record[field_name] = None
-                        elif isinstance(value, (dict, list)):
-                            processed_record[field_name] = str(value)
-                        else:
-                            processed_record[field_name] = value
                     
-                    rows.append(processed_record)
-                
-                except EOFError:
-                    # Reached end of records
-                    break
-                except Exception as record_error:
-                    print(f"Error reading individual record: {record_error}")
-                    print(traceback.format_exc())
-                    break
+                    # Safely extract fields
+                    for field in avro_schema.fields:
+                        field_name = field.name
+                        try:
+                            value = record.get(field_name)
+                            
+                            # Comprehensive value handling
+                            if value is None:
+                                processed_record[field_name] = None
+                            elif isinstance(value, (dict, list)):
+                                processed_record[field_name] = str(value)
+                            else:
+                                processed_record[field_name] = value
+                        except Exception as field_error:
+                            print(f"Error processing field {field_name}: {field_error}")
+                            processed_record[field_name] = None
+                    
+                    return processed_record
+                except Exception as read_error:
+                    print(f"Error reading record: {read_error}")
+                    return None
             
-            # Convert to DataFrame and save
+            # Read records with multiple attempts
+            max_attempts = 5
+            for attempt in range(max_attempts):
+                try:
+                    record = safe_read_record()
+                    if record:
+                        rows.append(record)
+                except EOFError:
+                    break
+                except Exception as e:
+                    print(f"Attempt {attempt + 1} failed: {e}")
+            
+            # Process and save results
             if rows:
                 df = pd.DataFrame(rows)
                 csv_filename = f'pubsub_data_{pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")}.csv'
@@ -87,18 +110,18 @@ def process_avro_message(message):
                 message.ack()
                 return df
             else:
-                print("No records processed from the message")
+                print("No records could be processed from the message")
                 message.ack()
                 return None
         
-        except Exception as decode_error:
-            print(f"Decoding error: {decode_error}")
+        except Exception as read_error:
+            print(f"Comprehensive read error: {read_error}")
             print(traceback.format_exc())
             message.nack()
             return None
     
-    except Exception as e:
-        print(f"Overall processing error: {e}")
+    except Exception as overall_error:
+        print(f"Overall message processing error: {overall_error}")
         print(traceback.format_exc())
         message.nack()
         return None
@@ -118,7 +141,9 @@ print("Listening for messages on subscription:", subscription_path)
 
 with subscriber:
     try:
-        streaming_pull_future.result(timeout=300)  # 5-minute timeout
+        # Increased timeout and added more verbose logging
+        streaming_pull_future.result(timeout=600)  # 10-minute timeout
     except TimeoutError:
+        print("Subscription timed out")
         streaming_pull_future.cancel()
         streaming_pull_future.result()
