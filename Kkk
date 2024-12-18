@@ -64,12 +64,6 @@ def process_avro_message(message):
                         processed_record[key] = value
                 
                 rows.append(processed_record)
-                
-                # Print first 50 records
-                print(processed_record)
-                processed_record_count += 1
-                if processed_record_count == 50:
-                    break
             
             # Save processed records
             if rows:
