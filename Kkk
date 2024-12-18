@@ -1,17 +1,24 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
 from fastavro import reader
-import io as inputoutput
+import io
 import csv
 import typing
 import logging
+import json
+import uuid
+
+# Configure logging
 logging.getLogger().setLevel(logging.INFO)
+
+# Define project and subscription details
 project_id = "vz-it-np-gudv-dev-vzntdo-0"
 subscription_id = "wireline_churn_test_topic-sub"
 subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
 gcs_bucket = "vznet-test"
 gcs_output_path = "wireline_churn_test/tgt/customer_profile"
 
+# Define the schema for the CSV
 schema = [
     "ont_activation_date",
     "data_circuit_id",
@@ -25,73 +32,70 @@ schema = [
     "line_of_business"
 ]
 
+# Function to parse Avro messages
 def parse_avro_message(message):
-    logging.log(logging.INFO,str(message))
+    logging.info("Parsing message...")
     try:
-        import io
-        from fastavro import reader
         avro_file = io.BytesIO(message)
         avro_reader = reader(avro_file)
-        records = []
-        for record in avro_reader:
-            records.append(record)
-        yield records  
-    except Exception as e:
-        logging.log(logging.INFO,f"Error parsing Avro message: {e}")
 
-def create_unique_filename(records: typing.List[dict]) -> typing.Tuple[str, str]:
-    import io
-    import csv
-    import uuid
-    filename = f"customer_profile_{uuid.uuid4()}.csv"
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=schema)
-    writer.writeheader()
-    for record in records:
-        writer.writerow(record)
-    logging.log(logging.INFO,"output#="+str(records))
-    return filename, output.getvalue()
-class transformToCSV(beam.DoFn):
+        for record in avro_reader:
+            yield record  # Yield each record directly
+    except Exception as e:
+        logging.error(f"Error parsing Avro message: {e}")
+
+# Function to transform records to CSV-friendly format
+class TransformToCSV(beam.DoFn):
     def process(self, element):
-        import json
-        flat_records ={}
+        flat_records = {}
         for key, value in element.items():
-            if isinstance(value,(dict, list)):
+            if isinstance(value, (dict, list)):
                 flat_records[key] = json.dumps(value)
             else:
                 flat_records[key] = value
-        return [flat_records]
-def extract_headers(records):
-    first_record = next(iter(records),None)
-    if first_record:
-        logging.log(logging.INFO, str(first_record))
-        return list(first_record.keys())
-    logging.log(logging.INFO, "No header set as of now!")
-    return []
+        yield flat_records  # Yield the modified record
 
 def run_pipeline():
-    import apache_beam as beam
+    pipeline_options = PipelineOptions(
+        streaming=True,
+        project=project_id,
+        temp_location=f"gs://{gcs_bucket}/wireline_churn_test/tmp",
+        region="us-central1"
+    )
+
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        messages     = (pipeline | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path))
-        parsed_data  = (messages | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message))
-        csv_data     = (parsed_data| "TransformToCSV" >> beam.ParDo(transformToCSV()))
-        print_data   = (csv_data|"Print" >> beam.Map(Print_element))
-        csv_data | "WriteToGCS" >> beam.Map(lambda x: beam.io.WriteToText(
-            f"gs://vznet-test/wireline_churn_test/tgt/",
-            file_name_suffix=".csv",
-            shard_name_template=''
-        ))
+        messages = (pipeline 
+                    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path))
+        
+        parsed_data = (messages 
+                       | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message))
+        
+        csv_data = (parsed_data 
+                    | "TransformToCSV" >> beam.ParDo(TransformToCSV()))
+        
+        # Group all records into a single element for writing
+        grouped_data = (csv_data 
+                        | "DummyKey" >> beam.Map(lambda record: (None, record))  # Add a dummy key
+                        | "GroupAll" >> beam.GroupByKey()  # Group by the dummy key
+                        | "Flatten" >> beam.FlatMap(lambda kv: kv[1])  # Flatten the grouped result
+                       )
+
+        # Write to a single CSV file
+        (grouped_data 
+         | "WriteToGCS" >> 
+         beam.io.WriteToText(
+             f"gs://{gcs_bucket}/{gcs_output_path}/output",  # Specify the path for the output
+             file_name_suffix=".csv",
+             shard_name_template=""  # This ensures a single output file
+         ))
+
+        # Optional: Print elements for debugging
+        print_data = (csv_data | "Print" >> beam.Map(Print_element))
 
 def Print_element(element):
-    logging.info("element="+str(element))
+    logging.info("element=" + str(element))
     return element
-
-pipeline_options = PipelineOptions(
-    streaming=True,
-    project=project_id,
-    temp_location=f"gs://{gcs_bucket}/wireline_churn_test/tmp",
-    region="us-central1"
-)
 
 if __name__ == '__main__':
     run_pipeline()
+
