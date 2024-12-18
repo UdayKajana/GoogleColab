@@ -1,1 +1,100 @@
-element=[{'ont_activation_date': '2019-08-28 04:00:00.000000 UTC', 'data_circuit_id': 'A6o6LHciNWfMMDXRAk/AmzSqPzZU3lHpzvpeWb0487+2CKWc6iSMbMf+z7sLju0UiEj/jLnGDmcLlU5t5llkug==', 'circuit_id': 'Nm9qk2Q0DT7NDTmDNtHpHM9+z2ezUL+wyqO/vMiaCX2uuZJ8kdj/1sg2+bc+Mc9yIh+w4fjnjjdcwdVFGaGbvw==', 'video_circuit_id': 'Nm9qk2Q0DT7NDTmDNtHpHM9+z2ezUL+wyqO/vMiaCX2uuZJ8kdj/1sg2+bc+Mc9yIh+w4fjnjjdcwdVFGaGbvw==', 'service_type': 'BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==', 'address_id': 17935568585, 'vision_account_id': 'ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==', 'vision_customer_id': 'Tz1bRQ1Md58vddT9EfHmU3LvXtmlDB4CDpLWNFRmI7wg4gFO9lSIEbNXNQAJiVqZIU2/dcdEjaZLlGHhFD4H0g==', 'address_type': 'SFU', 'line_of_business': 'Residence'}, {'ont_activation_date': '2022-12-02 05:00:00.000000 UTC', 'data_circuit_id': 'IbO+zFtdYczFOgBHOkiNNINdZtJpvQClHr6diOckccWWcteRkgJaxL25j3K1OjH9dbrLAUWR2Jd1kDoN44TJug==', 'circuit_id': 'LGF8pf4gkOZcABnNq9NMxNcE/U2Gc0B3trVK0hEzNp7v5Z7ONCJVcILwpbzVuqyOFxz2XIU/rjOerp6NEmjmnQ==', 'video_circuit_id': 'LGF8pf4gkOZcABnNq9NMxNcE/U2Gc0B3trVK0hEzNp7v5Z7ONCJVcILwpbzVuqyOFxz2XIU/rjOerp6NEmjmnQ==', 'service_type': 'BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==', 'address_id': 20808267725, 'vision_account_id': 'ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==', 'vision_customer_id': '0iry578HPx7m50gGovhEuzJ4PyQlDoNd8C+/KmgQuGAoLjtm+W5XITuPgx7f1I9OgZmSvDtv+uMxvd3uJFQvrQ==', 'address_type': 'SFU', 'line_of_business': 'Residence'}, {'ont_activation_date': '2013-09-25 04:00:00.000000 UTC', 'data_circuit_id': 'rMHBCC+ykgC/9zwlWzUv/8G24ZqV9gw9jNJduVmH2wNXpyjEIhGhi+WdQdqMT9vhKgJnNBlLYfhKfea7TIB9Og==', 'circuit_id': 'MvV1TBghZQgnLAVL0Wr26WOkZATO74VKa4AjrmtqFCPU5+/7pOnnGqb2gQne/trLcGHWtdElt18EAWWahFrUBA==', 'video_circuit_id': 'MvV1TBghZQgnLAVL0Wr26WOkZATO74VKa4AjrmtqFCPU5+/7pOnnGqb2gQne/trLcGHWtdElt18EAWWahFrUBA==', 'service_type': 'BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==', 'address_id': 6048778659, 'vision_account_id': 'ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==', 'vision_customer_id': 'hDrKalrkN0togNs3NUANBnnBzHs8YAJNVZp2Kh40VprmXevuV8ru01hJmsSSdJHFBg/PJic8EJJMBjb3H+MXrw==', 'address_type': 'SFU', 'line_of_business': 'Residence'}, {'ont_activation_date': '2022-04-22 04:00:00.000000 UTC', 'data_circuit_id': 'AoOWM2dW8jRIlOm51lkWyRQI91k1UCWkKzD4Aa5n7+cZjAzRDIxyJprZIHvW20gO6UHsCeBpm7GMsUQJYi6WTw==', 'circuit_id': '/W29FzHOvPmyW6tByKtWBoLAXw4uxrVx3ZT5/g86+6ywfKP69mt07bri7yjlF8ghx2C0ba31mY+PnP4jAv6NSw==', 'video_circuit_id': '/W29FzHOvPmyW6tByKtWBoLAXw4uxrVx3ZT5/g86+6ywfKP69mt07bri7yjlF8ghx2C0ba31mY+PnP4jAv6NSw==', 'service_type': 'BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==', 'address_id': 3904394730, 'vision_account_id': 'ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==', 'vision_customer_id': 'YEPpCIgEMTESHZssLLccxsKwGI4UKnx2uBfVfzIeN796tkeiCy1sl/7myo5F8m6xwtnU4btERy4xO1t1+hTX0g==', 'address_type': 'SFU', 'line_of_business': 'Residence'}, {'ont_activation_date': '2016-08-19 04:00:00.000000 UTC', 'data_circuit_id': 'qAqJlCEHI1lMAgBes6rKPhWpgTzzFV5samGFLI+2IfT+SXljEuFk8xwuKy5A4jxVQEy83cOBfSZPIWyzQcJLjg==', 'circuit_id': 'e6rPYidPr1hx97a/k91o2TModBtt5mKWFLquU+tN+fl5FYPJKq2tqoPpJjHskVPLshFJzauklDMxK3qkBXsa5w==', 'video_circuit_id': 'e6rPYidPr1hx97a/k91o2TModBtt5mKWFLquU+tN+fl5FYPJKq2tqoPpJjHskVPLshFJzauklDMxK3qkBXsa5w==', 'service_type': 'BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==', 'address_id': 6737129004, 'vision_account_id': 'ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==', 'vision_customer_id': 'rpDEAUbLwJpTmvHtla3ePTtiy4FISwxAuYVofA1C3xonBfFn7wCoEMA+oYYW6+GeT5eChU9DVO5lkC2eOuJwlw==', 'address_type': 'MDU', 'line_of_business': 'Residence'}, {'ont_activation_date': '2024-01-24 05:00:00.000000 UTC', 'data_circuit_id': 'ihAOs19wtBv7AIKXzXq7tHDj7ABb0/rWAZZ8JwMHvjpRmD1V/ZkzRtzII7rmVlzFbv18v/5ABSzKAL3b8bcN8w==', 'circuit_id': '5yydgcl6i32fvys4piRQxYtV4aHH+uKlU1ArEHFhv4qyKUBTnKcU/7cdUNT5xNXyUz4HTacDbdxhBiRpMYViqg==', 'video_circuit_id': '5yydgcl6i32fvys4piRQxYtV4aHH+uKlU1ArEHFhv4qyKUBTnKcU/7cdUNT5xNXyUz4HTacDbdxhBiRpMYViqg==', 'service_type': 'BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==', 'address_id': 11510820540, 'vision_account_id': 'ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==', 'vision_customer_id': 'Pnj80eflIPsEDgUwfOsVJp+DMNmmgbdkuDHXuC5BEP17fWDpx+JDC8fKgiC66ceRqXbn1jt1hdShKuvJA4azkw==', 'address_type': 'SFU', 'line_of_business': 'Residence'}, {'ont_activation_date': '2023-03-29 04:00:00.000000 UTC', 'data_circuit_id': 'u/xWeG8MNPL8SWy4TTPX5JcY5Tsk7hannwTBy9wwlSjwAieWUZ5VH3HDVUD8bHlFLcKwFdZpgIsKa+ZDwFK/KQ==', 'circuit_id': 'Rjk8xoPoi4wznf7vHIK8zx+hf0gZw5wRQXUAErg/JUnXJumDncmg5mVMLeG+04IN19ZWqH1Ct3ZCjr3coAhzRA==', 'video_circuit_id': 'Rjk8xoPoi4wznf7vHIK8zx+hf0gZw5wRQXUAErg/JUnXJumDncmg5mVMLeG+04IN19ZWqH1Ct3ZCjr3coAhzRA==', 'service_type': 'BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==', 'address_id': 2667582849, 'vision_account_id': 'ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==', 'vision_customer_id': 'OPvBp8bd5gaXFM+c0/0JsDmTpFdFaKLhNzB3NGKpK0ngCBkh81Jz1OxPm33L5frdMvhGCTceqoivcIhdBlSg6g==', 'address_type': 'SFU', 'line_of_business': 'Residence'}, {'ont_activation_date': '2022-01-13 05:00:00.000000 UTC', 'data_circuit_id': 'RfHuj1CXa7IVNOUohIlIncCgPO365ZSsN0r145iW5q5WIMek2ym5aZwuVoDdaFo4h1zhlaz5RMVKOjRkINcnag==', 'circuit_id': '9hjylpmVvOEHbX6DBvDMZFBzI35XYgnut2UIIUhac/KlKnSk4Gti1/fZuWWRQ90NjYSG/OyJ9/0N5I/2BtmqZg==', 'video_circuit_id': '9hjylpmVvOEHbX6DBvDMZFBzI35XYgnut2UIIUhac/KlKnSk4Gti1/fZuWWRQ90NjYSG/OyJ9/0N5I/2BtmqZg==', 'service_type': 'BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==', 'address_id': 8276499991, 'vision_account_id': 'ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==', 'vision_customer_id': 'grMm91hV+wa7Vuis6fJn5rhLZqkE/5zHMVNRn0SpEkZbGkTy98Zwex0tLMrft8wwwNno5hsJrLDW9rfbw/hLiQ==', 'address_type': 'MDU', 'line_of_business': 'Residence'}, {'ont_activation_date': '2012-12-09 05:00:00.000000 UTC', 'data_circuit_id': 'pOxqXHF0Xk7K/Pplwn4F8rbicoMgm0OW+CSvVdLy3EhIGpZyydm4D+mTmVDmPLVzwLa+mQoDR7vz7XGhSn/44w==', 'circuit_id': 'qxRhkkCDQ+Lgr+iPfzvIxGOoUPoAKvrJAKQw12IpSRXIJtvQiJQIWbm5adoXRjMYry/V+JgDc6n0AXR7pBMt9g==', 'video_circuit_id': 'qxRhkkCDQ+Lgr+iPfzvIxGOoUPoAKvrJAKQw12IpSRXIJtvQiJQIWbm5adoXRjMYry/V+JgDc6n0AXR7pBMt9g==', 'service_type': 'BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==', 'address_id': 11895135951, 'vision_account_id': 'ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==', 'vision_customer_id': 'TAESxSEKgbHsgWdDGvtfAuNV88b71UD6IougikPdoa4JDsubGMImJKI6SUZx0sFYMVdkNRYwymPom6UBjq5MhQ==', 'address_type': 'SFU', 'line_of_business': 'Residence'}, {'ont_activation_date': '2020-08-21 04:00:00.000000 UTC', 'data_circuit_id': 'D96A1rhOO/JNGxUb/pzeIisLnakNcNdlLqcF22rWGQD/tky7pDToMFc6mE1nWiMGUCP9WFxDqWewEyu0i2l6Tg==', 'circuit_id': 'lCBqAxtYfCJNIJWN1NL4rFRGpzzlckgzq4kZV37y74corzhzgc2XATgL7E36OPxmVryD7wSbwGDaxsC5yvHRfA==', 'video_circuit_id': 'lCBqAxtYfCJNIJWN1NL4rFRGpzzlckgzq4kZV37y74corzhzgc2XATgL7E36OPxmVryD7wSbwGDaxsC5yvHRfA==', 'service_type': 'BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==', 'address_id': 6283801747, 'vision_account_id': 'ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==', 'vision_customer_id': 'gJuaMD6hFjLE+R4r+/4Y5PzRBsc9qG2sgg1pdISjt2EXUBl/Zmlsauf5xerDFI3KUXHZcwTYv3tClP4Dl8h3LA==', 'address_type': 'MDU', 'line_of_business': 'Residence'}, {'ont_activation_date': '2019-12-23 05:00:00.000000 UTC', 'data_circuit_id': 'JwOtUz4X2NtG0PUE05Yu91f5Dz/L8RJMZhWa+bOnQjq7pAshY242eg4eK2ppwvHZPxTHq8EXD+KrRMMMlZfPoA==', 'circuit_id': 'BEgHb9htgK8lXxsbGM7nM0eBGCAQH10MAclMO6D510s1nTq9W7gL8Wt8eQsp9XGSFQm0RTC4R4Mh7hXM8z4UMQ==', 'video_circuit_id': 'BEgHb9htgK8lXxsbGM7nM0eBGCAQH10MAclMO6D510s1nTq9W7gL8Wt8eQsp9XGSFQm0RTC4R4Mh7hXM8z4UMQ==', 'service_type': 'BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==', 'address_id': ......
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from fastavro import reader
+import io as inputoutput
+import csv
+import typing
+import logging
+logging.getLogger().setLevel(logging.INFO)
+project_id = "vz-it-np-gudv-dev-vzntdo-0"
+subscription_id = "wireline_churn_test_topic-sub"
+subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
+gcs_bucket = "vznet-test"
+gcs_output_path = "wireline_churn_test/tgt/customer_profile"
+
+schema = [
+    "ont_activation_date",
+    "data_circuit_id",
+    "circuit_id",
+    "video_circuit_id",
+    "service_type",
+    "address_id",
+    "vision_account_id",
+    "vision_customer_id",
+    "address_type",
+    "line_of_business"
+]
+
+def parse_avro_message(message):
+    logging.log(logging.INFO,str(message))
+    try:
+        import io
+        from fastavro import reader
+        avro_file = io.BytesIO(message)
+        avro_reader = reader(avro_file)
+        records = []
+        for record in avro_reader:
+            records.append(record)
+        yield records  
+    except Exception as e:
+        logging.log(logging.INFO,f"Error parsing Avro message: {e}")
+
+def create_unique_filename(records: typing.List[dict]) -> typing.Tuple[str, str]:
+    import io
+    import csv
+    import uuid
+    filename = f"customer_profile_{uuid.uuid4()}.csv"
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=schema)
+    writer.writeheader()
+    for record in records:
+        writer.writerow(record)
+    logging.log(logging.INFO,"output#="+str(records))
+    return filename, output.getvalue()
+class transformToCSV(beam.DoFn):
+    def process(self, element):
+        import json
+        flat_records ={}
+        for key, value in element.items():
+            if isinstance(value,(dict, list)):
+                flat_records[key] = json.dumps(value)
+            else:
+                flat_records[key] = value
+        return [flat_records]
+def extract_headers(records):
+    first_record = next(iter(records),None)
+    if first_record:
+        logging.log(logging.INFO, str(first_record))
+        return list(first_record.keys())
+    logging.log(logging.INFO, "No header set as of now!")
+    return []
+
+def run_pipeline():
+    import apache_beam as beam
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        messages     = (pipeline | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path))
+        parsed_data  = (messages | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message))
+        csv_data     = (parsed_data| "TransformToCSV" >> beam.ParDo(transformToCSV()))
+        headers      = csv_data | beam.Map(lambda x:x) | beam.combiners.Sample.FirstElementPerKey()
+        header_list  = headers|beam.Map(extract_headers)
+        print_data   = (csv_data|"Print" >> beam.Map(Print_element))
+        csv_data | "WriteToGCS" >> beam.Map(lambda x: beam.io.WriteToText(
+            f"gs://vznet-test/wireline_churn_test/tgt/",
+            file_name_suffix=".csv",
+            header =header_list,
+            shard_name_template=''
+        ))
+
+def Print_element(element):
+    logging.info("element="+str(element))
+    return element
+
+pipeline_options = PipelineOptions(
+    streaming=True,
+    project=project_id,
+    temp_location=f"gs://{gcs_bucket}/wireline_churn_test/tmp",
+    region="us-central1"
+)
+
+if __name__ == '__main__':
+    run_pipeline()
