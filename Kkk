@@ -75,13 +75,10 @@ def run_pipeline():
         messages     = (pipeline | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path))
         parsed_data  = (messages | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message))
         csv_data     = (parsed_data| "TransformToCSV" >> beam.ParDo(transformToCSV()))
-        headers      = csv_data | beam.Map(lambda x:x) | beam.combiners.Sample.FirstElementPerKey()
-        header_list  = headers|beam.Map(extract_headers)
         print_data   = (csv_data|"Print" >> beam.Map(Print_element))
         csv_data | "WriteToGCS" >> beam.Map(lambda x: beam.io.WriteToText(
             f"gs://vznet-test/wireline_churn_test/tgt/",
             file_name_suffix=".csv",
-            header =header_list,
             shard_name_template=''
         ))
 
