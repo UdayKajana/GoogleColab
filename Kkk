@@ -1,12 +1,9 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-from fastavro import reader
 import io
 import csv
 import logging
 import uuid
-from io import BytesIO
-import fastavro
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -18,11 +15,11 @@ gcs_bucket = "vznet-test"
 gcs_output_path = "wireline_churn_test/tgt/customer_profile"
 
 def process_avro_to_csv(message_data):
-    """
-    Processes Avro data from Pub/Sub and converts it to a CSV string.
-    Returns a tuple: (filename, csv_data)
-    """
+    logging.log(logging.INFO, str(message_data))
+    from io import BytesIO
+    import fastavro
     try:
+        logging.log(logging.INFO, str(BytesIO))
         # Read Avro data
         bytes_reader = BytesIO(message_data)
         avro_reader = fastavro.reader(bytes_reader)
@@ -51,11 +48,7 @@ def process_avro_to_csv(message_data):
         return None
 
 def write_csv_to_gcs(element):
-    """
-    Writes CSV data to a GCS bucket as a file.
-    """
     from apache_beam.io.gcp.gcsio import GcsIO
-
     try:
         filename, csv_data = element
         if not csv_data:
