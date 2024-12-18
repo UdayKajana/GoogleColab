@@ -8,7 +8,6 @@ import logging
 import json
 import uuid
 
-# Configure logging
 logging.getLogger().setLevel(logging.INFO)
 
 # Define project and subscription details
@@ -17,43 +16,6 @@ subscription_id = "wireline_churn_test_topic-sub"
 subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
 gcs_bucket = "vznet-test"
 gcs_output_path = "wireline_churn_test/tgt/customer_profile"
-
-# Define the schema for the CSV
-schema = [
-    "ont_activation_date",
-    "data_circuit_id",
-    "circuit_id",
-    "video_circuit_id",
-    "service_type",
-    "address_id",
-    "vision_account_id",
-    "vision_customer_id",
-    "address_type",
-    "line_of_business"
-]
-
-# Function to parse Avro messages
-def parse_avro_message(message):
-    logging.info("Parsing message...")
-    try:
-        avro_file = io.BytesIO(message)
-        avro_reader = reader(avro_file)
-
-        for record in avro_reader:
-            yield record  # Yield each record directly
-    except Exception as e:
-        logging.error(f"Error parsing Avro message: {e}")
-
-# Function to transform records to CSV-friendly format
-class TransformToCSV(beam.DoFn):
-    def process(self, element):
-        flat_records = {}
-        for key, value in element.items():
-            if isinstance(value, (dict, list)):
-                flat_records[key] = json.dumps(value)
-            else:
-                flat_records[key] = value
-        yield flat_records  # Yield the modified record
 
 def run_pipeline():
     pipeline_options = PipelineOptions(
@@ -66,31 +28,7 @@ def run_pipeline():
     with beam.Pipeline(options=pipeline_options) as pipeline:
         messages = (pipeline 
                     | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path))
-        
-        parsed_data = (messages 
-                       | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message))
-        
-        csv_data = (parsed_data 
-                    | "TransformToCSV" >> beam.ParDo(TransformToCSV()))
-        
-        # Group all records into a single element for writing
-        grouped_data = (csv_data 
-                        | "DummyKey" >> beam.Map(lambda record: (None, record))  # Add a dummy key
-                        | "GroupAll" >> beam.GroupByKey()  # Group by the dummy key
-                        | "Flatten" >> beam.FlatMap(lambda kv: kv[1])  # Flatten the grouped result
-                       )
-
-        # Write to a single CSV file
-        (grouped_data 
-         | "WriteToGCS" >> 
-         beam.io.WriteToText(
-             f"gs://{gcs_bucket}/{gcs_output_path}/output",  # Specify the path for the output
-             file_name_suffix=".csv",
-             shard_name_template=""  # This ensures a single output file
-         ))
-
-        # Optional: Print elements for debugging
-        print_data = (csv_data | "Print" >> beam.Map(Print_element))
+        printing = (messages|"Printing" >> beam.Map(Print_element))
 
 def Print_element(element):
     logging.info("element=" + str(element))
@@ -98,4 +36,140 @@ def Print_element(element):
 
 if __name__ == '__main__':
     run_pipeline()
+I need this pipeline should hold the avro processing logic before printing stage with below logic (whic is returning a .csv data as a string)
 
+
+import io
+import json
+import traceback
+from google.cloud import pubsub_v1
+import avro.schema
+from avro.io import DatumReader, BinaryDecoder
+from io import BytesIO
+import fastavro
+import csv
+from datetime import datetime
+import io
+
+def extract_avro_schema_from_message(message_data):
+    try:
+        # Use fastavro to read the schema
+        bytes_reader = BytesIO(message_data)
+        reader = fastavro.reader(bytes_reader)
+        
+        # Extract the writer's schema
+        writer_schema = reader.writer_schema
+        print("Extracted Writer's Schema:")
+#         print(json.dumps(writer_schema, indent=2))
+        
+        return writer_schema
+    except Exception as e:
+        print(f"Error extracting schema: {e}")
+        return None
+
+def process_avro_message(message):
+    """
+    Robust Avro message processing with dynamic schema handling
+    
+    Returns:
+    - CSV content as a string if successful
+    - None if processing fails
+    """
+    try:
+        # Print basic message info
+        print(f"--- Message Debug ---")
+        print(f"Message length: {len(message.data)}")
+        
+        # Extract the writer's schema
+        writer_schema = extract_avro_schema_from_message(message.data)
+        if not writer_schema:
+            print("Failed to extract schema")
+            message.nack()
+            return None
+        
+        # Reset the bytes reader
+        bytes_reader = BytesIO(message.data)
+        
+        # Process records
+        rows = []
+        processed_record_count = 0
+        try:
+            for record in fastavro.reader(bytes_reader, writer_schema):
+                # Process each record
+                processed_record = {}
+                for key, value in record.items():
+                    # Handle various value types
+                    if value is None:
+                        processed_record[key] = None
+                    elif isinstance(value, (dict, list)):
+                        processed_record[key] = str(value)
+                    else:
+                        processed_record[key] = value
+                
+                rows.append(processed_record)
+                
+                # Print first 50 records
+#                 print(processed_record)
+#                 processed_record_count += 1
+#                 if processed_record_count == 50:
+#                     break
+            
+            # Process records to CSV string
+            if rows:
+                # Get column names from the first record
+                fieldnames = list(rows[0].keys())
+                
+                # Use StringIO to create an in-memory CSV
+                csv_buffer = io.StringIO()
+                writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
+                
+                # Write headers
+                writer.writeheader()
+                
+                # Write rows
+                for row in rows:
+                    writer.writerow(row)
+                
+                # Get the CSV content as a string
+                csv_content = csv_buffer.getvalue()
+                
+                print(f"Processed {len(rows)} records")
+                message.ack()
+                return csv_content
+            else:
+                print("No records could be processed from the message")
+                message.ack()
+                return None
+        
+        except Exception as read_error:
+            print(f"Error reading Avro records: {read_error}")
+            print(traceback.format_exc())
+            message.nack()
+            return None
+    
+    except Exception as overall_error:
+        print(f"Overall message processing error: {overall_error}")
+        print(traceback.format_exc())
+        message.nack()
+        return None
+
+# Pub/Sub configuration
+project_id = "vz-it-np-gudv-dev-vzntdo-0"
+subscription_id = "wireline_churn_test_topic-sub"
+
+# Create Pub/Sub subscriber
+subscriber = pubsub_v1.SubscriberClient()
+subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
+
+# Subscribe and process messages
+streaming_pull_future = subscriber.subscribe(subscription_path, callback=process_avro_message)
+print("Listening for messages on subscription:", subscription_path)
+
+with subscriber:
+    try:
+        # Extended timeout for long-running subscription
+        streaming_pull_future.result(timeout=900)  # 15-minute timeout
+    except TimeoutError:
+        print("Subscription timed out")
+        streaming_pull_future.cancel()
+        streaming_pull_future.result()
