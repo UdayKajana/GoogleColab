@@ -1,78 +1,58 @@
 import apache_beam as beam
+from apache_beam.io.gcp.spanner import WriteToSpanner
 from apache_beam.options.pipeline_options import PipelineOptions
-import io
-import csv
+from io import BytesIO
+import fastavro
 import logging
-import uuid
 
 logging.getLogger().setLevel(logging.INFO)
 
-# Define project and subscription details
-project_id = "vz-it-np-gudv-dev-vzntdo-0"
-subscription_id = "wireline_churn_test_topic-sub"
+# Spanner details
+project_id = "your-project-id"
+instance_id = "my-instance"
+database_id = "my-database"
+table_name = "my_table"
+
+# Subscription details
+subscription_id = "your-subscription-id"
 subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
-gcs_bucket = "vznet-test"
-gcs_output_path = "wireline_churn_test/tgt/customer_profile"
 
-def process_avro_to_csv(message_data):
-    logging.log(logging.INFO, str(message_data))
+# Define table schema
+table_columns = [
+    "column1",
+    "column2",
+    "column3"
+]
+
+
+def parse_avro_message(message):
+    """
+    Parse Avro message and map it to Spanner table structure.
+    """
     from io import BytesIO
-    import fastavro
     try:
-        logging.log(logging.INFO, str(BytesIO))
         # Read Avro data
-        bytes_reader = BytesIO(message_data)
+        bytes_reader = BytesIO(message)
         avro_reader = fastavro.reader(bytes_reader)
+        rows = []
 
-        # Extract records
-        records = [record for record in avro_reader]
-        if not records:
-            logging.warning("No records found in the Avro message.")
-            return None
-
-        # Convert records to CSV format
-        fieldnames = list(records[0].keys())
-        csv_buffer = io.StringIO()
-        writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(records)
-
-        # Generate a unique filename
-        unique_id = uuid.uuid4()
-        filename = f"message_{unique_id}.csv"
-
-        logging.info(f"Processed message into file: {filename}")
-        return filename, csv_buffer.getvalue()
+        # Extract records and map to Spanner schema
+        for record in avro_reader:
+            spanner_row = {column: record.get(column, None) for column in table_columns}
+            rows.append(spanner_row)
+        
+        return rows
     except Exception as e:
-        logging.error(f"Error processing Avro message: {e}")
-        return None
+        logging.error(f"Error parsing Avro message: {e}")
+        return []
 
-def write_csv_to_gcs(element):
-    from apache_beam.io.gcp.gcsio import GcsIO
-    try:
-        filename, csv_data = element
-        if not csv_data:
-            logging.warning(f"No CSV data to write for {filename}. Skipping.")
-            return
-
-        # Define GCS file path
-        gcs_path = f"gs://{gcs_bucket}/{gcs_output_path}/{filename}"
-
-        # Write CSV data to GCS
-        gcs_io = GcsIO()
-        with gcs_io.open(gcs_path, 'w') as gcs_file:
-            gcs_file.write(csv_data.encode("utf-8"))
-
-        logging.info(f"Successfully wrote {filename} to GCS: {gcs_path}")
-    except Exception as e:
-        logging.error(f"Error writing CSV to GCS: {e}")
 
 def run_pipeline():
-    # Set pipeline options
+    # Pipeline options
     pipeline_options = PipelineOptions(
         streaming=True,
         project=project_id,
-        temp_location=f"gs://{gcs_bucket}/wireline_churn_test/tmp",
+        temp_location=f"gs://your-bucket/temp",
         region="us-central1"
     )
 
@@ -82,14 +62,19 @@ def run_pipeline():
                     | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
                    )
 
-        # Process each Avro message into a CSV
-        csv_files = (messages
-                     | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv)
-                     )
+        # Parse Avro messages
+        parsed_rows = (messages
+                       | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)
+                      )
 
-        # Write CSV files to GCS
-        _ = (csv_files
-             | "WriteCSVToGCS" >> beam.Map(write_csv_to_gcs))
+        # Write to Spanner
+        _ = (parsed_rows
+             | "WriteToSpanner" >> WriteToSpanner(
+                 project_id=project_id,
+                 instance_id=instance_id,
+                 database_id=database_id,
+                 table=table_name
+             ))
 
 if __name__ == '__main__':
     run_pipeline()
