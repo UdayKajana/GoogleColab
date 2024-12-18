@@ -2,11 +2,12 @@ import apache_beam as beam
 import logging
 import json
 import traceback
-import pandas as pd
+import csv
 import fastavro
-from io import BytesIO
+from io import BytesIO, StringIO
 from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.transforms.combiners import CountCombineFn
+from apache_beam.io.textio import WriteToText
 
 # Configure logging
 logging.getLogger().setLevel(logging.INFO)
@@ -40,11 +41,11 @@ def extract_avro_message(message):
                 for key, value in record.items():
                     # Handle various value types
                     if value is None:
-                        processed_record[key] = None
+                        processed_record[key] = ''
                     elif isinstance(value, (dict, list)):
                         processed_record[key] = json.dumps(value)
                     else:
-                        processed_record[key] = value
+                        processed_record[key] = str(value)
                 
                 records.append(processed_record)
             
@@ -60,6 +61,27 @@ def extract_avro_message(message):
         logging.error(traceback.format_exc())
         return None
 
+def convert_to_csv_line(record):
+    """
+    Convert a record dictionary to a CSV line
+    
+    Args:
+        record (dict): A single record from Avro message
+    
+    Returns:
+        str: CSV formatted line
+    """
+    # If this is the first record, use its keys as headers
+    if not hasattr(convert_to_csv_line, 'headers'):
+        convert_to_csv_line.headers = list(record.keys())
+        yield ','.join(convert_to_csv_line.headers)
+    
+    # Convert record to CSV line
+    csv_line = ','.join([
+        f'"{str(record.get(header, ""))}"' for header in convert_to_csv_line.headers
+    ])
+    yield csv_line
+
 def run_pubsub_avro_pipeline():
     """
     Main pipeline to:
@@ -69,6 +91,9 @@ def run_pubsub_avro_pipeline():
     """
     # Subscription path
     subscription_path = f"projects/{PROJECT_ID}/subscriptions/{SUBSCRIPTION_ID}"
+    
+    # Unique output path for each pipeline run
+    output_path = f"gs://{GCS_BUCKET}/{GCS_OUTPUT_PATH}/customer_profile"
     
     # Pipeline options
     pipeline_options = PipelineOptions([
@@ -97,15 +122,19 @@ def run_pubsub_avro_pipeline():
             | 'FlattenRecords' >> beam.FlatMap(lambda x: x or [])  # Filter out None results
         )
         
-        # Convert to DataFrame and write to GCS
-        csv_files = (
+        # Convert records to CSV lines
+        csv_lines = (
             parsed_records
-            | 'CreateDataFrame' >> beam.Map(lambda records: pd.DataFrame(records))
-            | 'WriteToGCS' >> beam.Map(
-                lambda df: df.to_csv(
-                    f"gs://{GCS_BUCKET}/{GCS_OUTPUT_PATH}/customer_profile_{beam.DoFn.current_element_info().timestamp}.csv", 
-                    index=False
-                )
+            | 'ConvertToCSVLines' >> beam.FlatMap(convert_to_csv_line)
+        )
+        
+        # Write to GCS
+        _ = (
+            csv_lines
+            | 'WriteToGCS' >> WriteToText(
+                output_path, 
+                file_name_suffix='.csv', 
+                num_shards=1  # You can adjust sharding as needed
             )
         )
         
