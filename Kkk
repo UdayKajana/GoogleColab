@@ -1,3 +1,32 @@
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from fastavro import reader
+import io as inputoutput
+import csv
+import typing
+import logging
+logging.getLogger().setLevel(logging.INFO)
+project_id = "vz-it-np-gudv-dev-vzntdo-0"
+subscription_id = "wireline_churn_test_topic-sub"
+subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
+gcs_bucket = "vznet-test"
+gcs_output_path = "wireline_churn_test/tgt/customer_profile"
+
+schema = [
+    "ont_activation_date",
+    "data_circuit_id",
+    "circuit_id",
+    "video_circuit_id",
+    "service_type",
+    "address_id",
+    "vision_account_id",
+    "vision_customer_id",
+    "address_type",
+    "line_of_business"
+]
+
+
+
 import io
 import json
 import traceback
@@ -18,7 +47,7 @@ def extract_avro_schema_from_message(message_data):
         reader = fastavro.reader(bytes_reader)
         
         # Extract the writer's schema
-        writer_schema = reader.schema
+        writer_schema = reader.writer_schema
         print("Extracted Writer's Schema:")
         print(json.dumps(writer_schema, indent=2))
         
@@ -88,25 +117,43 @@ def process_avro_message(message):
         print(traceback.format_exc())
         message.nack()
         return None
+def run_pipeline():
+    import apache_beam as beam
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        messages = (
+            pipeline
+            | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
+        )
+        parsed_data = (
+            messages
+            | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)
+        )
+        print_data = (parsed_data|"Print" >> beam.Map(Print_element))
+        parsed_data | "WriteToGCS" >> beam.Map(lambda x: beam.io.WriteToText(
+            f"gs://vznet-test/wireline_churn_test/tgt/",
+            file_name_suffix=".csv",
+            num_shards=1 
+        ))
+        # csv_data = (
+        #     parsed_data
+        #     | "FormatToCSV" >> beam.Map(create_unique_filename)
+        # )
+        # print_data = (csv_data|"Print" >> beam.Map(Print_element))
+        # # csv_data | "WriteToGCS" >> beam.Map(lambda x: beam.io.WriteToText(
+        # #     f"gs://vznet-test/wireline_churn_test/tgt/",
+        # #     file_name_suffix=".csv",
+        # #     num_shards=1 
+        # # ))
 
-# Pub/Sub configuration
-project_id = "vz-it-np-gudv-dev-vzntdo-0"
-subscription_id = "wireline_churn_test_topic-sub"
+def Print_element(element):
+    logging.info("element="+str(element))
+    return element
+pipeline_options = PipelineOptions(
+    streaming=True,
+    project=project_id,
+    temp_location=f"gs://{gcs_bucket}/wireline_churn_test/tmp",
+    region="us-central1"
+)
 
-# Create Pub/Sub subscriber
-subscriber = pubsub_v1.SubscriberClient()
-subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
-
-# Subscribe and process messages
-streaming_pull_future = subscriber.subscribe(subscription_path, callback=process_avro_message)
-
-print("Listening for messages on subscription:", subscription_path)
-
-with subscriber:
-    try:
-        # Extended timeout for long-running subscription
-        streaming_pull_future.result(timeout=900)  # 15-minute timeout
-    except TimeoutError:
-        print("Subscription timed out")
-        streaming_pull_future.cancel()
-        streaming_pull_future.result()
+if __name__ == '__main__':
+    run_pipeline()
