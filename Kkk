@@ -8,6 +8,7 @@ from io import BytesIO
 import fastavro
 import csv
 from datetime import datetime
+import io
 
 def extract_avro_schema_from_message(message_data):
     """
@@ -31,6 +32,10 @@ def extract_avro_schema_from_message(message_data):
 def process_avro_message(message):
     """
     Robust Avro message processing with dynamic schema handling
+    
+    Returns:
+    - CSV content as a string if successful
+    - None if processing fails
     """
     try:
         # Print basic message info
@@ -64,31 +69,35 @@ def process_avro_message(message):
                         processed_record[key] = value
                 
                 rows.append(processed_record)
+                
+                # Print first 50 records
+                print(processed_record)
+                processed_record_count += 1
+                if processed_record_count == 50:
+                    break
             
-            # Save processed records
+            # Process records to CSV string
             if rows:
-                # Generate filename with timestamp
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                csv_filename = f'pubsub_data_{timestamp}.csv'
+                # Get column names from the first record
+                fieldnames = list(rows[0].keys())
                 
-                # Write to CSV
-                if rows:
-                    # Get column names from the first record
-                    fieldnames = list(rows[0].keys())
-                    
-                    with open(csv_filename, 'w', newline='') as csvfile:
-                        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                        
-                        # Write headers
-                        writer.writeheader()
-                        
-                        # Write rows
-                        for row in rows:
-                            writer.writerow(row)
+                # Use StringIO to create an in-memory CSV
+                csv_buffer = io.StringIO()
+                writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
                 
-                print(f"Saved {len(rows)} records to {csv_filename}")
+                # Write headers
+                writer.writeheader()
+                
+                # Write rows
+                for row in rows:
+                    writer.writerow(row)
+                
+                # Get the CSV content as a string
+                csv_content = csv_buffer.getvalue()
+                
+                print(f"Processed {len(rows)} records")
                 message.ack()
-                return rows
+                return csv_content
             else:
                 print("No records could be processed from the message")
                 message.ack()
