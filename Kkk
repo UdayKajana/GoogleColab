@@ -1,12 +1,13 @@
 import io
 import json
 import traceback
-import pandas as pd
 from google.cloud import pubsub_v1
 import avro.schema
 from avro.io import DatumReader, BinaryDecoder
 from io import BytesIO
 import fastavro
+import csv
+from datetime import datetime
 
 def extract_avro_schema_from_message(message_data):
     """
@@ -46,8 +47,9 @@ def process_avro_message(message):
         # Reset the bytes reader
         bytes_reader = BytesIO(message.data)
         
-        # Use fastavro to read records
+        # Process records
         rows = []
+        processed_record_count = 0
         try:
             for record in fastavro.reader(bytes_reader, writer_schema):
                 # Process each record
@@ -62,21 +64,37 @@ def process_avro_message(message):
                         processed_record[key] = value
                 
                 rows.append(processed_record)
+                
+                # Print first 50 records
+                print(processed_record)
+                processed_record_count += 1
+                if processed_record_count == 50:
+                    break
             
             # Save processed records
             if rows:
-                df = pd.DataFrame(rows)
-                count = 1
-                for i in rows:
-                    print(i)
-                    count = count +1
-                    if count ==50:
-                        break
-                csv_filename = f'pubsub_data_{pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")}.csv'
-                df.to_csv(csv_filename, index=False)
-                print(f"Saved {len(df)} records to {csv_filename}")
+                # Generate filename with timestamp
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                csv_filename = f'pubsub_data_{timestamp}.csv'
+                
+                # Write to CSV
+                if rows:
+                    # Get column names from the first record
+                    fieldnames = list(rows[0].keys())
+                    
+                    with open(csv_filename, 'w', newline='') as csvfile:
+                        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                        
+                        # Write headers
+                        writer.writeheader()
+                        
+                        # Write rows
+                        for row in rows:
+                            writer.writerow(row)
+                
+                print(f"Saved {len(rows)} records to {csv_filename}")
                 message.ack()
-                return df
+                return rows
             else:
                 print("No records could be processed from the message")
                 message.ack()
@@ -104,7 +122,6 @@ subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
 
 # Subscribe and process messages
 streaming_pull_future = subscriber.subscribe(subscription_path, callback=process_avro_message)
-
 print("Listening for messages on subscription:", subscription_path)
 
 with subscriber:
