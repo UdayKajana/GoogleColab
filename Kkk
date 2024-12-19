@@ -1,80 +1,42 @@
 import apache_beam as beam
-from apache_beam.io.gcp.spanner import WriteToSpanner
 from apache_beam.options.pipeline_options import PipelineOptions
-from io import BytesIO
-import fastavro
-import logging
+project_id = "vz-it-np-gudv-dev-vzntdo-0"
+dataset_id = 'test_dataset'
+table_id = 'dim_inventory_customer_profiles_norm_v0'
 
-logging.getLogger().setLevel(logging.INFO)
+# Define your GCS bucket and folder details
+gcs_bucket = "vznet-test"
+folder_name = 'wireline_churn_test'
 
-# Spanner details
-project_id = "your-project-id"
-instance_id = "my-instance"
-database_id = "my-database"
-table_name = "my_table"
+# Define your BigQuery query
+query = """
+    SELECT *
+    FROM `vz-it-np-gudv-dev-vzntdo-0.test_dataset.dim_inventory_customer_profiles_norm_v0`
+"""
 
-# Subscription details
-subscription_id = "your-subscription-id"
-subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
+# Define your pipeline options
+pipeline_options = PipelineOptions(
+    runner='DataflowRunner',
+    project=project_id,
+    region='us-central1',
+    temp_location="gs://vznet-test/wireline_churn_test/tmp",
+    staging_location="gs://vznet-test/wireline_churn_test/stg",
+)
 
-# Define table schema
-table_columns = [
-    "column1",
-    "column2",
-    "column3"
-]
-
-
-def parse_avro_message(message):
-    """
-    Parse Avro message and map it to Spanner table structure.
-    """
-    from io import BytesIO
-    try:
-        # Read Avro data
-        bytes_reader = BytesIO(message)
-        avro_reader = fastavro.reader(bytes_reader)
-        rows = []
-
-        # Extract records and map to Spanner schema
-        for record in avro_reader:
-            spanner_row = {column: record.get(column, None) for column in table_columns}
-            rows.append(spanner_row)
-        
-        return rows
-    except Exception as e:
-        logging.error(f"Error parsing Avro message: {e}")
-        return []
-
-
-def run_pipeline():
-    # Pipeline options
-    pipeline_options = PipelineOptions(
-        streaming=True,
-        project=project_id,
-        temp_location=f"gs://your-bucket/temp",
-        region="us-central1"
+# Create your pipeline
+with beam.Pipeline(options=pipeline_options) as pipeline:
+    # Read data from BigQuery
+    data = pipeline | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
+        query=query,
+        use_standard_sql=True,
     )
 
-    with beam.Pipeline(options=pipeline_options) as pipeline:
-        # Read messages from Pub/Sub
-        messages = (pipeline 
-                    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
-                   )
+    # Convert data to CSV format
+    csv_data = data | 'ConvertToCSV' >> beam.Map(lambda row: ','.join(str(x) for x in row.values()))
 
-        # Parse Avro messages
-        parsed_rows = (messages
-                       | "ParseAvroMessages" >> beam.FlatMap(parse_avro_message)
-                      )
-
-        # Write to Spanner
-        _ = (parsed_rows
-             | "WriteToSpanner" >> WriteToSpanner(
-                 project_id=project_id,
-                 instance_id=instance_id,
-                 database_id=database_id,
-                 table=table_name
-             ))
-
-if __name__ == '__main__':
-    run_pipeline()
+    # Write data to GCS
+    csv_data | 'WriteToGCS' >> beam.io.WriteToText(
+        f'gs://vznet-test/wireline_churn_test/output.csv',
+        file_name_suffix='.csv',
+        header='col1,col2,...',  
+    )
