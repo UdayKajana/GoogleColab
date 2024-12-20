@@ -1,42 +1,99 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-project_id = "vz-it-np-gudv-dev-vzntdo-0"
-dataset_id = 'test_dataset'
-table_id = 'dim_inventory_customer_profiles_norm_v0'
+import io
+import csv
+import logging
+import uuid
+import yaml
+logging.getLogger().setLevel(logging.INFO)
+config =''
+with open('/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.yaml', 'r') as config_file:
+    config = yaml.safe_load(config_file)
+project_id  = config['dev']['project'] 
+subscription_id  = config['dev']['subscription_id'] 
+gcs_bucket  = config['dev']['tgt_gcs_bucket'] 
+folder_name = config['dev']['tgt_gcs_folder'] 
+dfregion    = config['dev']['region']  
+dftemp_location = config['dev']['temp_location']
+dfstaging_location = config['dev']['staging_location']
 
-# Define your GCS bucket and folder details
-gcs_bucket = "vznet-test"
-folder_name = 'wireline_churn_test'
+subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
+gcs_output_path = "wireline_churn_test/tgt/customer_profile"
 
-# Define your BigQuery query
-query = """
-    SELECT *
-    FROM `vz-it-np-gudv-dev-vzntdo-0.test_dataset.dim_inventory_customer_profiles_norm_v0`
-"""
+def process_avro_to_csv(message_data):
+    logging.log(logging.INFO, str(message_data))
+    from io import BytesIO
+    import io
+    import fastavro
+    import csv
+    import uuid
+    try:
+        logging.log(logging.INFO, str(BytesIO))
+        # Read Avro data
+        bytes_reader = BytesIO(message_data)
+        avro_reader = fastavro.reader(bytes_reader)
 
-# Define your pipeline options
-pipeline_options = PipelineOptions(
-    runner='DataflowRunner',
-    project=project_id,
-    region='us-central1',
-    temp_location="gs://vznet-test/wireline_churn_test/tmp",
-    staging_location="gs://vznet-test/wireline_churn_test/stg",
-)
+        # Extract records
+        records = [record for record in avro_reader]
+        if not records:
+            logging.warning("No records found in the Avro message.")
+            return None
 
-# Create your pipeline
-with beam.Pipeline(options=pipeline_options) as pipeline:
-    # Read data from BigQuery
-    data = pipeline | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
-        query=query,
-        use_standard_sql=True,
+        # Convert records to CSV format
+        fieldnames = list(records[0].keys())
+        csv_buffer = io.StringIO()
+        writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(records)
+
+        # Generate a unique filename
+        unique_id = uuid.uuid4()
+        filename = f"message_{unique_id}.csv"
+
+        logging.info(f"Processed message into file: {filename}")
+        return filename, csv_buffer.getvalue()
+    except Exception as e:
+        logging.error(f"Error processing Avro message: {e}")
+        return None
+
+def write_csv_to_gcs(element):
+    from apache_beam.io.gcp.gcsio import GcsIO
+    try:
+        filename, csv_data = element
+        if not csv_data:
+            logging.warning(f"No CSV data to write for {filename}. Skipping.")
+            return
+
+        # GCS file path
+        gcs_path = f"gs://{gcs_bucket}/{gcs_output_path}/{filename}"
+
+        # Write CSV data to GCS
+        gcs_io = GcsIO()
+        with gcs_io.open(gcs_path, 'w') as gcs_file:
+            gcs_file.write(csv_data.encode("utf-8"))
+
+        logging.info(f"Successfully wrote {filename} to GCS: {gcs_path}")
+    except Exception as e:
+        logging.error(f"Error writing CSV to GCS: {e}")
+
+def run_pipeline():
+    # Set pipeline options
+    pipeline_options = PipelineOptions(
+        streaming=True,
+        project=project_id,
+        temp_location= dftemp_location,
+        region= dfregion
     )
 
-    # Convert data to CSV format
-    csv_data = data | 'ConvertToCSV' >> beam.Map(lambda row: ','.join(str(x) for x in row.values()))
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        messages = (pipeline 
+                    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
+                   )
+        csv_files = (messages
+                     | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv)
+                     )
+        _ = (csv_files
+             | "WriteCSVToGCS" >> beam.Map(write_csv_to_gcs))
 
-    # Write data to GCS
-    csv_data | 'WriteToGCS' >> beam.io.WriteToText(
-        f'gs://vznet-test/wireline_churn_test/output.csv',
-        file_name_suffix='.csv',
-        header='col1,col2,...',  
-    )
+if __name__ == '__main__':
+    run_pipeline()
