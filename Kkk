@@ -1,40 +1,13 @@
-import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions
-import logging
-
-# Set logging level
-logging.getLogger().setLevel(logging.INFO)
-
-# Define custom options for runtime parameters
-class CustomOptions(PipelineOptions):
-    @classmethod
-    def _add_argparse_args(cls, parser):
-        parser.add_argument('--project_id', required=True, help='GCP Project ID')
-        parser.add_argument('--input_bq_table', required=True, help='Input BigQuery Table (project.dataset.table)')
-        parser.add_argument('--output_gcs_path', required=True, help='GCS path for the output CSV file')
-        parser.add_argument('--region', required=True, help='Dataflow region')
-        parser.add_argument('--temp_location', required=True, help='Temporary location for Dataflow job')
-        parser.add_argument('--staging_location', required=True, help='Staging location for Dataflow job')
-
-def run_pipeline():
-    # Parse pipeline options
-    pipeline_options = PipelineOptions()
-    custom_options = pipeline_options.view_as(CustomOptions)
-
-    # Print the submitted inputs
-    logging.info("Job Inputs:")
-    logging.info(f"Project ID: {custom_options.project_id}")
-    logging.info(f"Input BigQuery Table: {custom_options.input_bq_table}")
-    logging.info(f"Output GCS Path: {custom_options.output_gcs_path}")
-    logging.info(f"Region: {custom_options.region}")
-    logging.info(f"Temporary Location: {custom_options.temp_location}")
-    logging.info(f"Staging Location: {custom_options.staging_location}")
-
-    # Minimal pipeline definition
-    with beam.Pipeline(options=pipeline_options) as pipeline:
-        _ = (pipeline 
-             | "CreateDummyPCollection" >> beam.Create([])  # No actual processing
-            )
-
-if __name__ == '__main__':
-    run_pipeline()
+ python3 /vzwhome/udayka/workspace/accept_user_input.py \
+--project vz-it-np-gudv-dev-vzntdo-0 \
+--runner DataflowRunner \
+--region us-east4 --staging_location gs://vznet-test/accept_user_input/stg \
+--temp_location gs://vznet-test/wireline_churn_test/tmp/ \
+--template_location gs://vznet-test/wireline_churn_test/code/accept_user_input
+--input_bq_table test_dataset.dim_inventory_customer_profiles_norm_v0
+--output_gcs_path gs://vznet-test/wireline_churn_test/tmp
+usage: accept_user_input.py [-h] --project_id PROJECT_ID --input_bq_table INPUT_BQ_TABLE --output_gcs_path OUTPUT_GCS_PATH --region REGION --temp_location
+                            TEMP_LOCATION --staging_location STAGING_LOCATION
+accept_user_input.py: error: the following arguments are required: --input_bq_table, --output_gcs_path
+--login: --input_bq_table: command not found
+--login: --output_gcs_path: command not found
