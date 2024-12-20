@@ -1,13 +1,38 @@
- python3 /vzwhome/udayka/workspace/accept_user_input.py \
---project vz-it-np-gudv-dev-vzntdo-0 \
---runner DataflowRunner \
---region us-east4 --staging_location gs://vznet-test/accept_user_input/stg \
---temp_location gs://vznet-test/wireline_churn_test/tmp/ \
---template_location gs://vznet-test/wireline_churn_test/code/accept_user_input
---input_bq_table test_dataset.dim_inventory_customer_profiles_norm_v0
---output_gcs_path gs://vznet-test/wireline_churn_test/tmp
-usage: accept_user_input.py [-h] --project_id PROJECT_ID --input_bq_table INPUT_BQ_TABLE --output_gcs_path OUTPUT_GCS_PATH --region REGION --temp_location
-                            TEMP_LOCATION --staging_location STAGING_LOCATION
-accept_user_input.py: error: the following arguments are required: --input_bq_table, --output_gcs_path
---login: --input_bq_table: command not found
---login: --output_gcs_path: command not found
+Traceback (most recent call last):
+  File "/vzwhome/udayka/workspace/accept_user_input.py", line 38, in <module>
+    run_pipeline()
+  File "/vzwhome/udayka/workspace/accept_user_input.py", line 33, in run_pipeline
+    _ = (pipeline
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 613, in __exit__
+    self.result = self.run()
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 560, in run
+    return Pipeline.from_runner_api(
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 587, in run
+    return self.runner.run_pipeline(self, self._options)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/dataflow/dataflow_runner.py", line 502, in run_pipeline
+    self.dataflow_client.create_job(self.job), self)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/utils/retry.py", line 298, in wrapper
+    return fun(*args, **kwargs)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/dataflow/internal/apiclient.py", line 694, in create_job
+    self.create_job_description(job)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/dataflow/internal/apiclient.py", line 788, in create_job_description
+    job.proto.environment = Environment(
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/dataflow/internal/apiclient.py", line 268, in __init__
+    sdk_pipeline_options = options.get_all_options(retain_unknown_options=True)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/options/pipeline_options.py", line 332, in get_all_options
+    cls._add_argparse_args(parser)  # pylint: disable=protected-access
+  File "/vzwhome/udayka/workspace/accept_user_input.py", line 13, in _add_argparse_args
+    parser.add_argument('--region', required=True, help='Dataflow region')
+  File "/usr/lib64/python3.9/argparse.py", line 1441, in add_argument
+    return self._add_action(action)
+  File "/usr/lib64/python3.9/argparse.py", line 1806, in _add_action
+    self._optionals._add_action(action)
+  File "/usr/lib64/python3.9/argparse.py", line 1643, in _add_action
+    action = super(_ArgumentGroup, self)._add_action(action)
+  File "/usr/lib64/python3.9/argparse.py", line 1455, in _add_action
+    self._check_conflict(action)
+  File "/usr/lib64/python3.9/argparse.py", line 1592, in _check_conflict
+    conflict_handler(action, confl_optionals)
+  File "/usr/lib64/python3.9/argparse.py", line 1601, in _handle_conflict_error
+    raise ArgumentError(action, message % conflict_string)
+argparse.ArgumentError: argument --region: conflicting option string: --region
