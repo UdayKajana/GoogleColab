@@ -81,10 +81,9 @@ def run_pipeline(argv = None):
     known_args, pipeline_args = parser.parse_known_args(argv)
     pipeline_options = BQToGCSOptions(pipeline_args)
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        subscription_string= pipeline_options.input_subscription.get()
         messages = (pipeline
                      
-                    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_string)
+                    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=pipeline_options.input_subscription)
                    )
         csv_files = (messages
                      | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv)
