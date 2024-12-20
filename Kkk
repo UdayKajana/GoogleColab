@@ -1,39 +1,13 @@
-import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
-import logging
-import argparse
-
-logging.getLogger().setLevel(logging.INFO)
-
-def run_pipeline():
-    parser = argparse.ArgumentParser()
-    # Add all arguments
-    parser.add_argument('--project', required=True)
-    parser.add_argument('--input_bq_table', required=True)
-    parser.add_argument('--output_gcs_path', required=True)
-    parser.add_argument('--region', required=True)
-    parser.add_argument('--temp_location', required=True)
-    parser.add_argument('--staging_location', required=True)
-    parser.add_argument('--runner', required=True)
-
-    # Parse known args and create pipeline options
-    known_args, pipeline_args = parser.parse_known_args()
-    pipeline_options = PipelineOptions(pipeline_args)
-
-    # Print the submitted inputs
-    logging.info("Job Inputs:")
-    logging.info(f"Project ID: {known_args.project}")
-    logging.info(f"Input BigQuery Table: {known_args.input_bq_table}")
-    logging.info(f"Output GCS Path: {known_args.output_gcs_path}")
-    logging.info(f"Region: {known_args.region}")
-    logging.info(f"Temporary Location: {known_args.temp_location}")
-    logging.info(f"Staging Location: {known_args.staging_location}")
-
-    # Minimal pipeline definition
-    with beam.Pipeline(options=pipeline_options) as pipeline:
-        _ = (pipeline 
-             | "CreateDummyPCollection" >> beam.Create([])  # No actual processing
-            )
-
-if __name__ == '__main__':
-    run_pipeline()
+gcloud dataflow jobs run accept_user_input1018 \
+--gcs-location gs://vznet-test/wireline_churn_test/code/accept_user_input \
+--region us-east4 --num-workers 2 --max-workers 2 --worker-machine-type n2-standard-2 \
+--disable-public-ips --network=shared-np-east \
+--dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
+--subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
+--service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com \
+--staging_location gs://vznet-test/accept_user_input/stg \
+--temp_location gs://vznet-test/wireline_churn_test/tmp/ \
+--template_location gs://vznet-test/wireline_churn_test/code/accept_user_input \
+--input_bq_table test_dataset.dim_inventory_customer_profiles_norm_v0 \
+--output_gcs_path gs://vznet-test/wireline_churn_test/tmp \
+--staging_location gs://vznet-test/wireline_churn_test/stg
