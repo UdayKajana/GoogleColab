@@ -1,59 +1,39 @@
 import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions, StandardOptions
-from apache_beam.options.value_provider import ValueProvider, StaticValueProvider
-import argparse
+from apache_beam.options.pipeline_options import PipelineOptions
 import logging
+import argparse
 
-class BigQueryToGCSOptions(PipelineOptions):
+class BQToGCSOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
-        # Input BigQuery table parameters
+        # Input BigQuery table
         parser.add_value_provider_argument(
             '--input_table',
             type=str,
             help='Input BigQuery table in format: project_id:dataset_id.table_id'
         )
         
-        # Output GCS path parameter
+        # Output GCS path
         parser.add_value_provider_argument(
             '--output_path',
             type=str,
             help='Output GCS path (e.g., gs://bucket/path/prefix)'
         )
 
-        # Optional parameters
-        parser.add_value_provider_argument(
-            '--query',
-            type=str,
-            help='SQL query to execute instead of reading entire table',
-            default=None
-        )
-
 def run(argv=None):
     """Main entry point for the Dataflow pipeline."""
-    
     parser = argparse.ArgumentParser()
     known_args, pipeline_args = parser.parse_known_args(argv)
 
     # Create pipeline options
-    pipeline_options = BigQueryToGCSOptions(pipeline_args)
-    pipeline_options.view_as(SetupOptions).save_main_session = True
-    pipeline_options.view_as(StandardOptions).runner = 'DataflowRunner'
+    pipeline_options = BQToGCSOptions(pipeline_args)
 
-    # Create and run the pipeline
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        # Read from BigQuery
-        if pipeline_options.query:
-            data = pipeline | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
-                query=pipeline_options.query,
-                use_standard_sql=True,
-                gcp_project=pipeline_options.project
-            )
-        else:
-            data = pipeline | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
-                table=pipeline_options.input_table,
-                gcp_project=pipeline_options.project
-            )
+        # Read from BigQuery using ValueProvider
+        data = pipeline | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
+            table=pipeline_options.input_table,
+            use_standard_sql=True
+        )
 
         # Convert each row to CSV format
         def row_to_csv(row):
@@ -61,12 +41,11 @@ def run(argv=None):
 
         csv_data = data | 'ConvertToCSV' >> beam.Map(row_to_csv)
 
-        # Write to GCS
+        # Write to GCS using ValueProvider
         _ = csv_data | 'WriteToGCS' >> beam.io.WriteToText(
             file_path_prefix=pipeline_options.output_path,
             file_name_suffix='.csv',
-            header=None,  # You can add a header row if needed
-            num_shards=0  # Auto-shard
+            num_shards=1
         )
 
 if __name__ == '__main__':
@@ -74,27 +53,30 @@ if __name__ == '__main__':
     run()
 
 
-from setuptools import setup
 
-setup(
-    name='bq-to-gcs-template',
-    version='1.0',
-    install_requires=[
-        'apache-beam[gcp]'
-    ]
-)
+python bq_to_gcs_template.py \
 
-python -m bq_to_gcs_template \
     --runner DataflowRunner \
+
     --project [YOUR_PROJECT_ID] \
+
+    --staging_location gs://[BUCKET_NAME]/staging \
+
     --temp_location gs://[BUCKET_NAME]/temp \
+
     --template_location gs://[BUCKET_NAME]/templates/bq_to_gcs \
-    --region [YOUR_REGION] \
-    --setup_file ./setup.py
+
+    --region [YOUR_REGION]
 
 
 gcloud dataflow jobs run bq-to-gcs-job \
+
     --gcs-location gs://[BUCKET_NAME]/templates/bq_to_gcs \
+
+    --region [YOUR_REGION] \
+
     --parameters \
-    input_table=[PROJECT:DATASET.TABLE],\
-    output_path=gs://[BUCKET_NAME]/output/data
+
+input_table="project_id:dataset_id.table_id",\
+
+output_path="gs://bucket-name/path/to/output"
