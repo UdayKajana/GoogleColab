@@ -8,9 +8,6 @@ import argparse
 
 logging.getLogger().setLevel(logging.INFO)
 
-# Global variable to hold the subscription value
-global_subscription = None
-
 class BQToGCSOptions(PipelineOptions):
     @classmethod
     def add_argparse_args(cls, parser):
@@ -25,10 +22,15 @@ class BQToGCSOptions(PipelineOptions):
             help='Output GCS path (e.g., gs://bucket/path/prefix)'
         )
 
-def set_global_subscription(subscription):
-    """Update the global subscription value."""
-    global global_subscription
-    global_subscription = subscription
+def get_subscription_value(subscription_value_provider):
+    """
+    Resolves the subscription value from the ValueProvider.
+    This ensures that the subscription value is retrieved before creating the pipeline graph.
+    """
+    if subscription_value_provider.is_accessible():
+        return subscription_value_provider.get()
+    else:
+        raise ValueError("Subscription value is not accessible at runtime.")
 
 def process_avro_to_csv(message_data):
     logging.log(logging.INFO, str(message_data))
@@ -85,20 +87,17 @@ class WriteToGCS(beam.DoFn):
             logging.error(f"Error writing CSV to GCS: {e}")
 
 def run_pipeline(argv=None):
-    global global_subscription
-
     parser = argparse.ArgumentParser()
     known_args, pipeline_args = parser.parse_known_args(argv)
     pipeline_options = BQToGCSOptions(pipeline_args)
 
-    # Set the global subscription value from the pipeline options
-    if pipeline_options.input_subscription:
-        set_global_subscription(pipeline_options.input_subscription.get())
+    # Resolve subscription value
+    subscription_value = get_subscription_value(pipeline_options.input_subscription)
 
     with beam.Pipeline(options=pipeline_options) as pipeline:
         messages = (pipeline 
                    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(
-                       subscription=global_subscription)
+                       subscription=subscription_value)
                    )
         
         csv_files = (messages
