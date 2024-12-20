@@ -22,15 +22,23 @@ class BQToGCSOptions(PipelineOptions):
             help='Output GCS path (e.g., gs://bucket/path/prefix)'
         )
 
-def get_subscription_value(subscription_value_provider):
+def subscribe_PubSub_topic(pipeline, input_subscription_path):
     """
-    Resolves the subscription value from the ValueProvider.
-    This ensures that the subscription value is retrieved before creating the pipeline graph.
+    Consumes data from the Pub/Sub topic defined by the input_subscription_path.
+    
+    Args:
+        pipeline: The Apache Beam pipeline instance.
+        input_subscription_path: The subscription path for the Pub/Sub topic.
+        
+    Returns:
+        A PCollection of messages consumed from Pub/Sub.
     """
-    if subscription_value_provider.is_accessible():
-        return subscription_value_provider.get()
-    else:
-        raise ValueError("Subscription value is not accessible at runtime.")
+    if not input_subscription_path:
+        raise ValueError("Input subscription path is required for subscribing to Pub/Sub.")
+    
+    logging.info(f"Subscribing to Pub/Sub topic: {input_subscription_path}")
+    
+    return pipeline | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=input_subscription_path)
 
 def process_avro_to_csv(message_data):
     logging.log(logging.INFO, str(message_data))
@@ -91,20 +99,27 @@ def run_pipeline(argv=None):
     known_args, pipeline_args = parser.parse_known_args(argv)
     pipeline_options = BQToGCSOptions(pipeline_args)
 
-    # Resolve subscription value
-    subscription_value = get_subscription_value(pipeline_options.input_subscription)
+    # Load the input_subscription from pipeline options
+    input_subscription_path = (
+        pipeline_options.input_subscription.get()
+        if pipeline_options.input_subscription.is_accessible()
+        else None
+    )
+
+    if not input_subscription_path:
+        raise ValueError("Input subscription path must be provided via pipeline options.")
 
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        messages = (pipeline 
-                   | "ReadFromPubSub" >> beam.io.ReadFromPubSub(
-                       subscription=subscription_value)
-                   )
-        
+        # Consume data from Pub/Sub
+        messages = subscribe_PubSub_topic(pipeline, input_subscription_path)
+
+        # Process the messages into CSV files
         csv_files = (messages
                     | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv)
                     | "FilterNone" >> beam.Filter(lambda x: x is not None)
                     )
         
+        # Write the CSV files to GCS
         _ = (csv_files
              | "WriteCSVToGCS" >> beam.ParDo(WriteToGCS(pipeline_options.output_path)))
 
