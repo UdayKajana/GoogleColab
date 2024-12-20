@@ -1,3 +1,27 @@
+python3 /vzwhome/udayka/workspace/accept_user_input.py \
+--project vz-it-np-gudv-dev-vzntdo-0 \
+--runner DataflowRunner \
+--region us-east4 \
+--staging_location gs://vznet-test/accept_user_input/stg \
+--temp_location gs://vznet-test/wireline_churn_test/tmp/ \
+--template_location gs://vznet-test/wireline_churn_test/code/accept_user_input \
+--input_bq_table test_dataset.dim_inventory_customer_profiles_norm_v0 \
+--output_gcs_path gs://vznet-test/wireline_churn_test/tmp \
+--staging_location gs://vznet-test/wireline_churn_test/stg
+INFO:root:Job Inputs:
+INFO:root:Project ID: vz-it-np-gudv-dev-vzntdo-0
+INFO:root:Input BigQuery Table: test_dataset.dim_inventory_customer_profiles_norm_v0
+INFO:root:Output GCS Path: gs://vznet-test/wireline_churn_test/tmp
+INFO:root:Region: us-east4
+INFO:root:Temporary Location: gs://vznet-test/wireline_churn_test/tmp/
+INFO:root:Staging Location: gs://vznet-test/wireline_churn_test/stg
+INFO:apache_beam.runners.dataflow.dataflow_runner:Pipeline has additional dependencies to be installed in SDK worker container, consider using the SDK container image pre-building workflow to avoid repetitive installations. Learn more on https://cloud.google.com/dataflow/docs/guides/using-custom-containers#prebuild
+INFO:root:Using provided Python SDK container image: gcr.io/cloud-dataflow/v1beta3/beam_python3.9_sdk:2.57.0
+INFO:root:Python SDK container image set to "gcr.io/cloud-dataflow/v1beta3/beam_python3.9_sdk:2.57.0" for Docker environment
+INFO:apache_beam.runners.dataflow.internal.apiclient:Starting GCS upload to gs://vznet-test/wireline_churn_test/stg/beamapp-slvznet-1220065611-738596-uvw442vd.1734677771.738734/submission_environment_dependencies.txt...
+INFO:apache_beam.runners.dataflow.internal.apiclient:Completed GCS upload to gs://vznet-test/wireline_churn_test/stg/beamapp-slvznet-1220065611-738596-uvw442vd.1734677771.738734/submission_environment_dependencies.txt in 0 seconds.
+INFO:apache_beam.runners.dataflow.internal.apiclient:Starting GCS upload to gs://vznet-test/wireline_churn_test/stg/beamapp-slvznet-1220065611-738596-uvw442vd.1734677771.738734/pipeline.pb...
+INFO:apache_beam.runners.dataflow.internal.apiclient:Completed GCS upload to gs://vznet-test/wireline_churn_test/stg/beamapp-slvznet-1220065611-738596-uvw442vd.1734677771.738734/pipeline.pb in 0 seconds.
 Traceback (most recent call last):
   File "/vzwhome/udayka/workspace/accept_user_input.py", line 38, in <module>
     run_pipeline()
@@ -36,3 +60,45 @@ Traceback (most recent call last):
   File "/usr/lib64/python3.9/argparse.py", line 1601, in _handle_conflict_error
     raise ArgumentError(action, message % conflict_string)
 argparse.ArgumentError: argument --region: conflicting option string: --region
+
+
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+import logging
+
+logging.getLogger().setLevel(logging.INFO)
+
+class CustomOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_argument('--project_id', required=True, help='GCP Project ID')
+        parser.add_argument('--input_bq_table', required=True, help='Input BigQuery Table (project.dataset.table)')
+        parser.add_argument('--output_gcs_path', required=True, help='GCS path for the output CSV file')
+        parser.add_argument('--region', required=True, help='Dataflow region')
+        parser.add_argument('--temp_location', required=True, help='Temporary location for Dataflow job')
+        parser.add_argument('--staging_location', required=True, help='Staging location for Dataflow job')
+
+def run_pipeline():
+    # Parse pipeline options
+    pipeline_options = PipelineOptions()
+    custom_options = pipeline_options.view_as(CustomOptions)
+
+    # Print the submitted inputs
+    logging.info("Job Inputs:")
+    logging.info(f"Project ID: {custom_options.project_id}")
+    logging.info(f"Input BigQuery Table: {custom_options.input_bq_table}")
+    logging.info(f"Output GCS Path: {custom_options.output_gcs_path}")
+    logging.info(f"Region: {custom_options.region}")
+    logging.info(f"Temporary Location: {custom_options.temp_location}")
+    logging.info(f"Staging Location: {custom_options.staging_location}")
+
+    # Minimal pipeline definition
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        _ = (pipeline 
+             | "CreateDummyPCollection" >> beam.Create([])  # No actual processing
+            )
+
+if __name__ == '__main__':
+    run_pipeline()
+
+
