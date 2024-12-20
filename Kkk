@@ -98,5 +98,26 @@ if __name__ == '__main__':
     ]
 }
 
-# requirements.txt
-apache-beam[gcp]==2.50.0
+
+
+
+
+# Build the template
+gcloud dataflow flex-template build \
+    gs://vznet-test/flex-templates/bigquery-to-gcs \
+    --image-gcr-path gcr.io/vz-it-np-gudv-dev-vzntdo-0/dataflow-flex-template \
+    --sdk-language PYTHON \
+    --flex-template-base-image PYTHON3 \
+    --py-path pipeline.py \
+    --metadata-file metadata.json
+
+# Run the template
+gcloud dataflow flex-template run "bigquery-to-gcs-job-$(date +%Y%m%d-%H%M%S)" \
+    --template-file-gcs-location gs://vznet-test/flex-templates/bigquery-to-gcs \
+    --project vz-it-np-gudv-dev-vzntdo-0 \
+    --region us-east4 \
+    --parameters input_bq_table=test_dataset.dim_inventory_customer_profiles_norm_v0 \
+    --parameters output_gcs_path=gs://vznet-test/wireline_churn_test/tmp \
+    --parameters staging_location=gs://vznet-test/accept_user_input/stg \
+    --parameters temp_location=gs://vznet-test/wireline_churn_test/tmp/ \
+    --parameters region=us-east4
