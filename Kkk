@@ -1,89 +1,102 @@
+# pipeline.py
 import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
-import logging
+from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions, SetupOptions
 import argparse
 
-class PrintParameters(beam.DoFn):
-    def process(self, element, input_bq_table, output_gcs_path):
-        logging.info(f"Received element: {element}")
-        logging.info(f"Input BigQuery table: {input_bq_table}")
-        logging.info(f"Output GCS path: {output_gcs_path}")
-        yield element
+class CustomPipelineOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        # Required parameters
+        parser.add_argument(
+            '--input_bq_table',
+            required=True,
+            help='Input BigQuery table in format: dataset.table'
+        )
+        parser.add_argument(
+            '--output_gcs_path',
+            required=True,
+            help='Output GCS path'
+        )
+        # Optional parameters with defaults
+        parser.add_argument(
+            '--region',
+            default='us-east4',
+            help='GCP region for the pipeline'
+        )
+        parser.add_argument(
+            '--staging_location',
+            help='GCS path for staging'
+        )
+        parser.add_argument(
+            '--temp_location',
+            help='GCS path for temporary files'
+        )
 
 def run(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--input_bq_table',
-        required=True,
-        help='Input BigQuery table, in format "project:dataset.table".'
-    )
-    parser.add_argument(
-        '--output_gcs_path',
-        required=True,
-        help='Output GCS path for storing results.'
-    )
     known_args, pipeline_args = parser.parse_known_args(argv)
-
-    # Define PipelineOptions
-    pipeline_options = PipelineOptions(pipeline_args)
-    pipeline_options.view_as(SetupOptions).save_main_session = True
-
-    # Log the input parameters
-    logging.info(f"Running pipeline with parameters: {known_args}")
+    
+    # Create pipeline options
+    pipeline_options = CustomPipelineOptions(pipeline_args)
+    
+    # Set specific pipeline options
+    pipeline_options.view_as(StandardOptions).runner = 'DataflowRunner'
+    
+    # If staging_location and temp_location are provided, set them
+    if pipeline_options.staging_location:
+        pipeline_options.view_as(SetupOptions).staging_location = pipeline_options.staging_location
+    if pipeline_options.temp_location:
+        pipeline_options.view_as(SetupOptions).temp_location = pipeline_options.temp_location
     
     # Create the pipeline
-    with beam.Pipeline(options=pipeline_options) as p:
-        # Read from BigQuery table
-        rows = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(table=known_args.input_bq_table)
-
-        # Process the data: Print the parameters and the data
-        processed_data = rows | 'PrintParameters' >> beam.ParDo(PrintParameters(), 
-                                                                input_bq_table=known_args.input_bq_table, 
-                                                                output_gcs_path=known_args.output_gcs_path)
-
-        # Optionally, write to a GCS location or another sink
-        processed_data | 'WriteToGCS' >> beam.io.WriteToText(known_args.output_gcs_path)
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        (pipeline 
+         | 'Read from BigQuery' >> beam.io.ReadFromBigQuery(
+             table=known_args.input_bq_table,
+             project=pipeline_options.project)
+         | 'Write to GCS' >> beam.io.WriteToText(
+             known_args.output_gcs_path)
+        )
 
 if __name__ == '__main__':
     run()
 
-
-
-
-from setuptools import setup, find_packages
-
-setup(
-    name='dataflow_flex_template',
-    version='0.1',
-    packages=find_packages(),
-    install_requires=[
-        'apache-beam[gcp]',
-        'google-cloud-bigquery',
-        'google-cloud-storage',
-    ],
-)
-
-
-
-
+# metadata.json
 {
-  "image": "gcr.io/dataflow-templates/v1/templates/beam-python-template",
-  "sdk_info": {
-    "language": "PYTHON"
-  },
-  "parameters": [
-    {
-      "name": "input_bq_table",
-      "label": "Input BigQuery Table",
-      "helpText": "BigQuery table to read from, in the format 'project:dataset.table'."
-    },
-    {
-      "name": "output_gcs_path",
-      "label": "Output GCS Path",
-      "helpText": "GCS path for storing the output files (e.g., gs://your-bucket/output/)."
-    }
-  ],
-  "containerSpec": {
-    "image": "gcr.io/<your-project-id>/dataflow-flextemplate"
-  }
+    "name": "Flex Template Example",
+    "description": "A simple BigQuery to GCS pipeline using Flex Template",
+    "parameters": [
+        {
+            "name": "input_bq_table",
+            "label": "Input BigQuery Table",
+            "helpText": "Input BigQuery table in format: dataset.table"
+        },
+        {
+            "name": "output_gcs_path",
+            "label": "Output GCS Path",
+            "helpText": "Output GCS path where the results will be written"
+        },
+        {
+            "name": "region",
+            "label": "Region",
+            "helpText": "GCP region for the pipeline",
+            "isOptional": true,
+            "defaultValue": "us-east4"
+        },
+        {
+            "name": "staging_location",
+            "label": "Staging Location",
+            "helpText": "GCS path for staging",
+            "isOptional": true
+        },
+        {
+            "name": "temp_location",
+            "label": "Temp Location",
+            "helpText": "GCS path for temporary files",
+            "isOptional": true
+        }
+    ]
 }
+
+# requirements.txt
+apache-beam[gcp]==2.50.0
