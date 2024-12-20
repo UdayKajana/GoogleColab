@@ -5,8 +5,9 @@ import csv
 import logging
 import uuid
 import argparse
+
 logging.getLogger().setLevel(logging.INFO)
-global pipeline_options
+
 class BQToGCSOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
@@ -57,56 +58,48 @@ def process_avro_to_csv(message_data):
         logging.error(f"Error processing Avro message: {e}")
         return None
 
-def write_csv_to_gcs(element):
-    global pipeline_options
-    from apache_beam.io.gcp.gcsio import GcsIO
-    try:
-        filename, csv_data = element
-        if not csv_data:
-            logging.warning(f"No CSV data to write for {filename}. Skipping.")
-            return
+class WriteToGCS(beam.DoFn):
+    def __init__(self, output_path):
+        self.output_path = output_path
+        
+    def process(self, element):
+        from apache_beam.io.gcp.gcsio import GcsIO
+        try:
+            filename, csv_data = element
+            if not csv_data:
+                logging.warning(f"No CSV data to write for {filename}. Skipping.")
+                return
 
-        # Write CSV data to GCS
-        gcs_io = GcsIO()
-        with gcs_io.open(pipeline_options.output_path.get(), 'w') as gcs_file:
-            gcs_file.write(csv_data.encode("utf-8"))
+            # Get the output path at runtime
+            output_path = self.output_path.get()
+            
+            # Write CSV data to GCS
+            gcs_io = GcsIO()
+            with gcs_io.open(output_path, 'w') as gcs_file:
+                gcs_file.write(csv_data.encode("utf-8"))
 
-        logging.info(f"Successfully wrote {filename} to GCS: {pipeline_options.output_path.get()}")
-    except Exception as e:
-        logging.error(f"Error writing CSV to GCS: {e}")
+            logging.info(f"Successfully wrote {filename} to GCS: {output_path}")
+        except Exception as e:
+            logging.error(f"Error writing CSV to GCS: {e}")
 
-def run_pipeline(argv = None):
-    global pipeline_options
+def run_pipeline(argv=None):
     parser = argparse.ArgumentParser()
     known_args, pipeline_args = parser.parse_known_args(argv)
     pipeline_options = BQToGCSOptions(pipeline_args)
+
     with beam.Pipeline(options=pipeline_options) as pipeline:
         messages = (pipeline 
-                    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=pipeline_options.input_subscription.get())
+                   | "ReadFromPubSub" >> beam.io.ReadFromPubSub(
+                       subscription=pipeline_options.input_subscription)
                    )
+        
         csv_files = (messages
-                     | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv)
-                     )
+                    | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv)
+                    | "FilterNone" >> beam.Filter(lambda x: x is not None)
+                    )
+        
         _ = (csv_files
-             | "WriteCSVToGCS" >> beam.Map(write_csv_to_gcs))
+             | "WriteCSVToGCS" >> beam.ParDo(WriteToGCS(pipeline_options.output_path)))
 
 if __name__ == '__main__':
     run_pipeline()
-
-
-
-
- python3 /vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py \
---project vz-it-np-gudv-dev-vzntdo-0 \
---runner DataflowRunner \
---region us-east4 --staging_location gs://vznet-test/wireline_churn_bq_spanner/stg \
---temp_location gs://vznet-test/wireline_churn_test/tmp/ \
---template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv
-Traceback (most recent call last):
-  File "/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py", line 95, in <module>
-    run_pipeline()
-  File "/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py", line 86, in run_pipeline
-    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=pipeline_options.input_subscription.get())
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/options/value_provider.py", line 121, in get
-    raise error.RuntimeValueProviderError(
-apache_beam.error.RuntimeValueProviderError: RuntimeValueProvider(option: input_subscription, type: str, default_value: None).get() not called from a runtime context
