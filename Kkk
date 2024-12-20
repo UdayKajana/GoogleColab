@@ -2,81 +2,48 @@ import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
 import argparse
 import logging
-
 logging.getLogger().setLevel(logging.INFO)
-
 class BQToGCSOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
-        # Input BigQuery table
         parser.add_value_provider_argument(
             '--input_table',
             type=str,
-            help='Input BigQuery table in format: project_id:dataset_id.table_id'
+            help='Input BigQuery table in format: project_id.dataset_id.table_id'
         )
-        
-        # Output GCS path
         parser.add_value_provider_argument(
-            '--output_path',
+            '--spanner_instance_id',
             type=str,
-            help='Output GCS path (e.g., gs://bucket/path/prefix)'
+            help='Spanner instance'
+        )
+        parser.add_value_provider_argument(
+            '--spanner_database_id',
+            type=str,
+            help='Spanner database'
+        )
+        parser.add_value_provider_argument(
+            '--spanner_table_id',
+            type=str,
+            help='Spanner table'
         )
 
 def run(argv=None):
     parser = argparse.ArgumentParser()
     known_args, pipeline_args = parser.parse_known_args(argv)
     pipeline_options = BQToGCSOptions(pipeline_args)
-
-    # Create your pipeline
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        # Read data from BigQuery using the parameter
-        data = pipeline | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
-            query=lambda: f"SELECT * FROM `{pipeline_options.input_table.get()}`",
-            use_standard_sql=True,
+        data = pipeline | "ReadFromBigQuery" >> beam.io.ReadFromBigQuery(
+            query=f'SELECT * FROM {pipeline_options.input_table.get()}', use_standard_sql=True
         )
-
-        # Convert to CSV
-        csv_data = data | 'ConvertToCSV' >> beam.Map(lambda row: ','.join(str(x) for x in row.values()))
-
-        # Add logging step
-        def print_element(element, input_table, output_path):
-            logging.info(f"Input table: {input_table}")
-            logging.info(f"Output path: {output_path}")
-            return element
-
-        print_data = csv_data | "PrintData" >> beam.Map(
-            lambda element: print_element(
-                element,
-                pipeline_options.input_table.get(),
-                pipeline_options.output_path.get()
-            )
-        )
-
-        # Write to GCS using the parameter
-        csv_data | 'WriteToGCS' >> beam.io.WriteToText(
-            file_path_prefix=pipeline_options.output_path,
-            file_name_suffix='.csv',
-            header="ont_activation_date,data_circuit_id,circuit_id,video_circuit_id,service_type,address_id,vision_account_id,vision_customer_id,address_type,line_of_business"
-        )
-
-if __name__ == '__main__':
-    logging.getLogger().setLevel(logging.INFO)
-    run()
-
-
-
-# Create template
-python3 /vzwhome/udayka/workspace/wireline_churn_bq_csv.py \
---project vz-it-np-gudv-dev-vzntdo-0 \
---runner DataflowRunner \
---region us-east4 \
---staging_location gs://vznet-test/wireline_churn_bq_spanner/stg \
---temp_location gs://vznet-test/wireline_churn_test/tmp/ \
---template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_bq_csv
-
-# Run the job
-gcloud dataflow jobs run wireline_churn_bq_spanner1018 \
---gcs-location gs://vznet-test/wireline_churn_test/code/wireline_churn_bq_csv \
+        data | "PrintData" >> beam.Map(lambda element : logging.log(logging.INFO, "Actual log:"+str(element)))
+        # data | "WriteToSpanner" >> beam.io.WriteToSpanner(
+        #     instance_id=pipeline_options.spanner_instance_id.get(),
+        #     database_id=pipeline_options.spanner_database_id.get(),
+        #     table_id=pipeline_options.spanner_table_id.get(),
+        # )
+for this code I am using below command to run it after creating template:
+ gcloud dataflow jobs run wireline_churn_bq_spanner1018 \
+--gcs-location gs://vznet-test/wireline_churn_test/code/wireline_churn_bq_spanner \
 --region us-east4 \
 --num-workers 2 \
 --max-workers 2 \
@@ -88,4 +55,7 @@ gcloud dataflow jobs run wireline_churn_bq_spanner1018 \
 --service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com \
 --parameters \
 input_table=vz-it-np-gudv-dev-vzntdo-0.test_dataset.dim_inventory_customer_profiles_norm_v0,\
-output_path=gs://vznet-test/wireline_churn_test/stg/output
+spanner_instance_id=sample_instance_id,\
+spanner_database_id=sample_database_id,\
+spanner_table_id=sample_table
+ERROR: (gcloud.dataflow.jobs.run) INVALID_ARGUMENT: (e400ba4cc2dcbd34): The workflow could not be created. Causes: (e400ba4cc2dcbc9d): Found unexpected parameters: ['input_table' (perhaps you meant 'update'), 'spanner_database_id' (perhaps you meant 'save_main_session'), 'spanner_instance_id' (perhaps you meant 'spark_master_url'), 'spanner_table_id' (perhaps you meant 'parallelism')]
