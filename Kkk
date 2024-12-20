@@ -5,15 +5,18 @@ import csv
 import logging
 import uuid
 import argparse
+
 logging.getLogger().setLevel(logging.INFO)
+
 global pipeline_options
+
 class BQToGCSOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
         parser.add_value_provider_argument(
             '--input_subscription',
             type=str,
-            help='pubsub subscription path'
+            help='PubSub subscription path (e.g., projects/YOUR_PROJECT_ID/subscriptions/YOUR_SUBSCRIPTION_NAME)'
         )
         parser.add_value_provider_argument(
             '--output_path',
@@ -24,18 +27,18 @@ class BQToGCSOptions(PipelineOptions):
 def process_avro_to_csv(message_data):
     logging.log(logging.INFO, str(message_data))
     from io import BytesIO
-    import io
     import fastavro
     import csv
     import uuid
+
     try:
-        logging.log(logging.INFO, str(BytesIO))
         # Read Avro data
         bytes_reader = BytesIO(message_data)
         avro_reader = fastavro.reader(bytes_reader)
 
         # Extract records
         records = [record for record in avro_reader]
+
         if not records:
             logging.warning("No records found in the Avro message.")
             return None
@@ -50,9 +53,10 @@ def process_avro_to_csv(message_data):
         # Generate a unique filename
         unique_id = uuid.uuid4()
         filename = f"message_{unique_id}.csv"
-
         logging.info(f"Processed message into file: {filename}")
+
         return filename, csv_buffer.getvalue()
+
     except Exception as e:
         logging.error(f"Error processing Avro message: {e}")
         return None
@@ -60,8 +64,10 @@ def process_avro_to_csv(message_data):
 def write_csv_to_gcs(element):
     global pipeline_options
     from apache_beam.io.gcp.gcsio import GcsIO
+
     try:
         filename, csv_data = element
+
         if not csv_data:
             logging.warning(f"No CSV data to write for {filename}. Skipping.")
             return
@@ -72,49 +78,52 @@ def write_csv_to_gcs(element):
             gcs_file.write(csv_data.encode("utf-8"))
 
         logging.info(f"Successfully wrote {filename} to GCS: {pipeline_options.output_path.get()}")
+
     except Exception as e:
         logging.error(f"Error writing CSV to GCS: {e}")
 
-def run_pipeline(argv = None):
+# Create a DoFn to extract the subscription string
+class ExtractSubscription(beam.DoFn):
+    def process(self, element):
+        # Yield the subscription string
+        yield element
+
+def run_pipeline(argv=None):
     global pipeline_options
     parser = argparse.ArgumentParser()
     known_args, pipeline_args = parser.parse_known_args(argv)
     pipeline_options = BQToGCSOptions(pipeline_args)
+
+    # Start the pipeline
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        messages = (pipeline
-                     
-                    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=pipeline_options.input_subscription)
-                   )
-        csv_files = (messages
-                     | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv)
-                     )
-        _ = (csv_files
-             | "WriteCSVToGCS" >> beam.Map(write_csv_to_gcs))
+        # Create a single element PCollection with the input subscription
+        subscription = (
+            pipeline
+            | "CreateInputSubscription" >> beam.Create([pipeline_options.input_subscription])
+        )
+        
+        # Extract the subscription
+        subscription = (
+            subscription
+            | "ExtractSubscription" >> beam.ParDo(ExtractSubscription())
+        )
+
+        # Use the subscription in the ReadFromPubSub task
+        messages = (
+            subscription
+            | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=beam.pvalue.AsSingleton(subscription))
+        )
+
+        csv_files = (
+            messages
+            | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv)
+        )
+
+        _ = (
+            csv_files
+            | "WriteCSVToGCS" >> beam.Map(write_csv_to_gcs)
+        )
 
 if __name__ == '__main__':
     run_pipeline()
 
-
-python3 /vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py \
---project vz-it-np-gudv-dev-vzntdo-0 \
---runner DataflowRunner \
---region us-east4 --staging_location gs://vznet-test/wireline_churn_bq_spanner/stg \
---temp_location gs://vznet-test/wireline_churn_test/tmp/ \
---template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv \
---parameters \
-input_subscription=projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/wireline_churn_test_topic-sub,\
-output_path=gs://vznet-test/wireline_churn_test/stg
-Traceback (most recent call last):
-  File "/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py", line 95, in <module>
-    run_pipeline()
-  File "/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py", line 86, in run_pipeline
-    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=pipeline_options.input_subscription)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/gcp/pubsub.py", line 256, in __init__
-    self._source = _PubSubSource(
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/gcp/pubsub.py", line 465, in __init__
-    self.project, self.subscription_name = parse_subscription(subscription)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/gcp/pubsub.py", line 418, in parse_subscription
-    match = re.match(SUBSCRIPTION_REGEXP, full_subscription)
-  File "/usr/lib64/python3.9/re.py", line 191, in match
-    return _compile(pattern, flags).match(string)
-TypeError: expected string or bytes-like object
