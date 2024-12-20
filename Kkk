@@ -1,93 +1,89 @@
 import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.options.value_provider import ValueProvider
+from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
 import logging
+import argparse
 
-logging.getLogger().setLevel(logging.INFO)
-
-class CustomPipelineOptions(PipelineOptions):
-    @classmethod
-    def _add_argparse_args(cls, parser):
-        # Runtime parameters
-        parser.add_value_provider_argument(
-            '--input_bq_table',
-            type=str,
-            help='Input BigQuery Table'
-        )
-        parser.add_value_provider_argument(
-            '--output_gcs_path',
-            type=str,
-            help='Output GCS path'
-        )
-        parser.add_value_provider_argument(
-            '--network',
-            type=str,
-            help='Network'
-        )
-        parser.add_value_provider_argument(
-            '--dataflow_kms_key',
-            type=str,
-            help='Dataflow KMS Key'
-        )
-        parser.add_value_provider_argument(
-            '--subnetwork',
-            type=str,
-            help='Subnetwork'
-        )
-        parser.add_value_provider_argument(
-            '--service_account_email',
-            type=str,
-            help='Service Account Email'
-        )
-        parser.add_value_provider_argument(
-            '--num_workers',
-            type=int,
-            help='Number of workers'
-        )
-        parser.add_value_provider_argument(
-            '--max_workers',
-            type=int,
-            help='Maximum number of workers'
-        )
-        parser.add_value_provider_argument(
-            '--worker_machine_type',
-            type=str,
-            help='Worker machine type'
-        )
-
-class LogParameters(beam.DoFn):
-    def __init__(self, options):
-        self.options = options
-    
-    def process(self, element):
-        logging.info("Runtime Parameter Values:")
-        logging.info(f"Input BigQuery Table: {self.options.input_bq_table.get()}")
-        logging.info(f"Output GCS Path: {self.options.output_gcs_path.get()}")
-        logging.info(f"Network: {self.options.network.get()}")
-        logging.info(f"Dataflow KMS Key: {self.options.dataflow_kms_key.get()}")
-        logging.info(f"Subnetwork: {self.options.subnetwork.get()}")
-        logging.info(f"Service Account Email: {self.options.service_account_email.get()}")
-        logging.info(f"Number of Workers: {self.options.num_workers.get()}")
-        logging.info(f"Max Workers: {self.options.max_workers.get()}")
-        logging.info(f"Worker Machine Type: {self.options.worker_machine_type.get()}")
+class PrintParameters(beam.DoFn):
+    def process(self, element, input_bq_table, output_gcs_path):
+        logging.info(f"Received element: {element}")
+        logging.info(f"Input BigQuery table: {input_bq_table}")
+        logging.info(f"Output GCS path: {output_gcs_path}")
         yield element
 
-def run_pipeline():
-    pipeline_options = PipelineOptions()
-    custom_options = pipeline_options.view_as(CustomPipelineOptions)
+def run(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--input_bq_table',
+        required=True,
+        help='Input BigQuery table, in format "project:dataset.table".'
+    )
+    parser.add_argument(
+        '--output_gcs_path',
+        required=True,
+        help='Output GCS path for storing results.'
+    )
+    known_args, pipeline_args = parser.parse_known_args(argv)
 
-    # Print static pipeline options at construction time
-    logging.info("Pipeline Construction - Static Parameters:")
-    logging.info(f"Project: {pipeline_options.get_all_options().get('project')}")
-    logging.info(f"Region: {pipeline_options.get_all_options().get('region')}")
-    logging.info(f"Temp Location: {pipeline_options.get_all_options().get('temp_location')}")
-    logging.info(f"Staging Location: {pipeline_options.get_all_options().get('staging_location')}")
+    # Define PipelineOptions
+    pipeline_options = PipelineOptions(pipeline_args)
+    pipeline_options.view_as(SetupOptions).save_main_session = True
 
-    with beam.Pipeline(options=pipeline_options) as pipeline:
-        _ = (pipeline 
-             | "Create Initial Element" >> beam.Create([None])
-             | "Log Runtime Parameters" >> beam.ParDo(LogParameters(custom_options))
-            )
+    # Log the input parameters
+    logging.info(f"Running pipeline with parameters: {known_args}")
+    
+    # Create the pipeline
+    with beam.Pipeline(options=pipeline_options) as p:
+        # Read from BigQuery table
+        rows = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(table=known_args.input_bq_table)
+
+        # Process the data: Print the parameters and the data
+        processed_data = rows | 'PrintParameters' >> beam.ParDo(PrintParameters(), 
+                                                                input_bq_table=known_args.input_bq_table, 
+                                                                output_gcs_path=known_args.output_gcs_path)
+
+        # Optionally, write to a GCS location or another sink
+        processed_data | 'WriteToGCS' >> beam.io.WriteToText(known_args.output_gcs_path)
 
 if __name__ == '__main__':
-    run_pipeline()
+    run()
+
+
+
+
+from setuptools import setup, find_packages
+
+setup(
+    name='dataflow_flex_template',
+    version='0.1',
+    packages=find_packages(),
+    install_requires=[
+        'apache-beam[gcp]',
+        'google-cloud-bigquery',
+        'google-cloud-storage',
+    ],
+)
+
+
+
+
+{
+  "image": "gcr.io/dataflow-templates/v1/templates/beam-python-template",
+  "sdk_info": {
+    "language": "PYTHON"
+  },
+  "parameters": [
+    {
+      "name": "input_bq_table",
+      "label": "Input BigQuery Table",
+      "helpText": "BigQuery table to read from, in the format 'project:dataset.table'."
+    },
+    {
+      "name": "output_gcs_path",
+      "label": "Output GCS Path",
+      "helpText": "GCS path for storing the output files (e.g., gs://your-bucket/output/)."
+    }
+  ],
+  "containerSpec": {
+    "image": "gcr.io/<your-project-id>/dataflow-flextemplate"
+  }
+}
