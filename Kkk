@@ -1,61 +1,112 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-import argparse
+import io
+import csv
 import logging
+import uuid
+import argparse
 logging.getLogger().setLevel(logging.INFO)
+global pipeline_options
 class BQToGCSOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
         parser.add_value_provider_argument(
-            '--input_table',
+            '--input_subscription',
             type=str,
-            help='Input BigQuery table in format: project_id.dataset_id.table_id'
+            help='pubsub subscription path'
         )
         parser.add_value_provider_argument(
-            '--spanner_instance_id',
+            '--output_path',
             type=str,
-            help='Spanner instance'
-        )
-        parser.add_value_provider_argument(
-            '--spanner_database_id',
-            type=str,
-            help='Spanner database'
-        )
-        parser.add_value_provider_argument(
-            '--spanner_table_id',
-            type=str,
-            help='Spanner table'
+            help='Output GCS path (e.g., gs://bucket/path/prefix)'
         )
 
-def run(argv=None):
+def process_avro_to_csv(message_data):
+    logging.log(logging.INFO, str(message_data))
+    from io import BytesIO
+    import io
+    import fastavro
+    import csv
+    import uuid
+    try:
+        logging.log(logging.INFO, str(BytesIO))
+        # Read Avro data
+        bytes_reader = BytesIO(message_data)
+        avro_reader = fastavro.reader(bytes_reader)
+
+        # Extract records
+        records = [record for record in avro_reader]
+        if not records:
+            logging.warning("No records found in the Avro message.")
+            return None
+
+        # Convert records to CSV format
+        fieldnames = list(records[0].keys())
+        csv_buffer = io.StringIO()
+        writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(records)
+
+        # Generate a unique filename
+        unique_id = uuid.uuid4()
+        filename = f"message_{unique_id}.csv"
+
+        logging.info(f"Processed message into file: {filename}")
+        return filename, csv_buffer.getvalue()
+    except Exception as e:
+        logging.error(f"Error processing Avro message: {e}")
+        return None
+
+def write_csv_to_gcs(element):
+    global pipeline_options
+    from apache_beam.io.gcp.gcsio import GcsIO
+    try:
+        filename, csv_data = element
+        if not csv_data:
+            logging.warning(f"No CSV data to write for {filename}. Skipping.")
+            return
+
+        # Write CSV data to GCS
+        gcs_io = GcsIO()
+        with gcs_io.open(pipeline_options.output_path.get(), 'w') as gcs_file:
+            gcs_file.write(csv_data.encode("utf-8"))
+
+        logging.info(f"Successfully wrote {filename} to GCS: {pipeline_options.output_path.get()}")
+    except Exception as e:
+        logging.error(f"Error writing CSV to GCS: {e}")
+
+def run_pipeline(argv = None):
+    global pipeline_options
     parser = argparse.ArgumentParser()
     known_args, pipeline_args = parser.parse_known_args(argv)
     pipeline_options = BQToGCSOptions(pipeline_args)
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        data = pipeline | "ReadFromBigQuery" >> beam.io.ReadFromBigQuery(
-            query=f'SELECT * FROM {pipeline_options.input_table.get()}', use_standard_sql=True
-        )
-        data | "PrintData" >> beam.Map(lambda element : logging.log(logging.INFO, "Actual log:"+str(element)))
-        # data | "WriteToSpanner" >> beam.io.WriteToSpanner(
-        #     instance_id=pipeline_options.spanner_instance_id.get(),
-        #     database_id=pipeline_options.spanner_database_id.get(),
-        #     table_id=pipeline_options.spanner_table_id.get(),
-        # )
-for this code I am using below command to run it after creating template:
- gcloud dataflow jobs run wireline_churn_bq_spanner1018 \
---gcs-location gs://vznet-test/wireline_churn_test/code/wireline_churn_bq_spanner \
---region us-east4 \
---num-workers 2 \
---max-workers 2 \
---worker-machine-type n2-standard-2 \
---disable-public-ips \
---network=shared-np-east \
---dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
---subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
---service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com \
---parameters \
-input_table=vz-it-np-gudv-dev-vzntdo-0.test_dataset.dim_inventory_customer_profiles_norm_v0,\
-spanner_instance_id=sample_instance_id,\
-spanner_database_id=sample_database_id,\
-spanner_table_id=sample_table
-ERROR: (gcloud.dataflow.jobs.run) INVALID_ARGUMENT: (e400ba4cc2dcbd34): The workflow could not be created. Causes: (e400ba4cc2dcbc9d): Found unexpected parameters: ['input_table' (perhaps you meant 'update'), 'spanner_database_id' (perhaps you meant 'save_main_session'), 'spanner_instance_id' (perhaps you meant 'spark_master_url'), 'spanner_table_id' (perhaps you meant 'parallelism')]
+        messages = (pipeline 
+                    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=pipeline_options.input_subscription.get())
+                   )
+        csv_files = (messages
+                     | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv)
+                     )
+        _ = (csv_files
+             | "WriteCSVToGCS" >> beam.Map(write_csv_to_gcs))
+
+if __name__ == '__main__':
+    run_pipeline()
+
+
+
+
+ python3 /vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py \
+--project vz-it-np-gudv-dev-vzntdo-0 \
+--runner DataflowRunner \
+--region us-east4 --staging_location gs://vznet-test/wireline_churn_bq_spanner/stg \
+--temp_location gs://vznet-test/wireline_churn_test/tmp/ \
+--template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv
+Traceback (most recent call last):
+  File "/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py", line 95, in <module>
+    run_pipeline()
+  File "/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py", line 86, in run_pipeline
+    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=pipeline_options.input_subscription.get())
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/options/value_provider.py", line 121, in get
+    raise error.RuntimeValueProviderError(
+apache_beam.error.RuntimeValueProviderError: RuntimeValueProvider(option: input_subscription, type: str, default_value: None).get() not called from a runtime context
