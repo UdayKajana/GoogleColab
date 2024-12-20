@@ -93,3 +93,28 @@ def run_pipeline(argv = None):
 
 if __name__ == '__main__':
     run_pipeline()
+
+
+python3 /vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py \
+--project vz-it-np-gudv-dev-vzntdo-0 \
+--runner DataflowRunner \
+--region us-east4 --staging_location gs://vznet-test/wireline_churn_bq_spanner/stg \
+--temp_location gs://vznet-test/wireline_churn_test/tmp/ \
+--template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv \
+--parameters \
+input_subscription=projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/wireline_churn_test_topic-sub,\
+output_path=gs://vznet-test/wireline_churn_test/stg
+Traceback (most recent call last):
+  File "/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py", line 95, in <module>
+    run_pipeline()
+  File "/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py", line 86, in run_pipeline
+    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=pipeline_options.input_subscription)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/gcp/pubsub.py", line 256, in __init__
+    self._source = _PubSubSource(
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/gcp/pubsub.py", line 465, in __init__
+    self.project, self.subscription_name = parse_subscription(subscription)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/gcp/pubsub.py", line 418, in parse_subscription
+    match = re.match(SUBSCRIPTION_REGEXP, full_subscription)
+  File "/usr/lib64/python3.9/re.py", line 191, in match
+    return _compile(pattern, flags).match(string)
+TypeError: expected string or bytes-like object
