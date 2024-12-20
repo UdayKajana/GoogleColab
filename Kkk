@@ -2,8 +2,9 @@ import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
 import argparse
 import logging
-import yaml
+
 logging.getLogger().setLevel(logging.INFO)
+
 class BQToGCSOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
@@ -20,43 +21,60 @@ class BQToGCSOptions(PipelineOptions):
             type=str,
             help='Output GCS path (e.g., gs://bucket/path/prefix)'
         )
-PipelineOptions=''
+
 def run(argv=None):
     parser = argparse.ArgumentParser()
     known_args, pipeline_args = parser.parse_known_args(argv)
-    # Create pipeline options
     pipeline_options = BQToGCSOptions(pipeline_args)
-    logging.log(logging.INFO, "inputttttt_table="+str(pipeline_options.input_table))
-    logging.log(logging.INFO, "outputttttt_path="+str(pipeline_options.output_path))
-# Create your pipeline
+
+    # Create your pipeline
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        # Read data from BigQuery
+        # Read data from BigQuery using the parameter
         data = pipeline | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
-            query= f"SELECT * FROM `vz-it-np-gudv-dev-vzntdo-0.test_dataset.dim_inventory_customer_profiles_norm_v0`",
+            query=lambda: f"SELECT * FROM `{pipeline_options.input_table.get()}`",
             use_standard_sql=True,
         )
+
+        # Convert to CSV
         csv_data = data | 'ConvertToCSV' >> beam.Map(lambda row: ','.join(str(x) for x in row.values()))
-        print_data = csv_data | "PrintData" >> beam.Map(lambda element : logging.log(logging.INFO,  "inputttttt_table="+str(pipeline_options.input_table)+"outputttttt_path="+str(pipeline_options.output_path)))
-        # Write data to GCS
-        csv_data | 'WriteToGCS' >> beam.io.WriteToText(
-            f'gs://vznet-test/wireline_churn_test/stg/output.csv',
-            file_name_suffix='.csv',
-            header="ont_activation_date, data_circuit_id, circuit_id, video_circuit_id, service_type, address_id, vision_account_id, vision_customer_id, address_type, line_of_business"
+
+        # Add logging step
+        def print_element(element, input_table, output_path):
+            logging.info(f"Input table: {input_table}")
+            logging.info(f"Output path: {output_path}")
+            return element
+
+        print_data = csv_data | "PrintData" >> beam.Map(
+            lambda element: print_element(
+                element,
+                pipeline_options.input_table.get(),
+                pipeline_options.output_path.get()
+            )
         )
+
+        # Write to GCS using the parameter
+        csv_data | 'WriteToGCS' >> beam.io.WriteToText(
+            file_path_prefix=pipeline_options.output_path,
+            file_name_suffix='.csv',
+            header="ont_activation_date,data_circuit_id,circuit_id,video_circuit_id,service_type,address_id,vision_account_id,vision_customer_id,address_type,line_of_business"
+        )
+
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
     run()
 
-it is printing:
-inputttttt_table=RuntimeValueProvider(option: input_table, type: str, default_value: None)outputttttt_path=RuntimeValueProvider(option: output_path, type: str, default_value: None)
-I am submitting job by running below comands:
+
+
+# Create template
 python3 /vzwhome/udayka/workspace/wireline_churn_bq_csv.py \
 --project vz-it-np-gudv-dev-vzntdo-0 \
 --runner DataflowRunner \
---region us-east4 --staging_location gs://vznet-test/wireline_churn_bq_spanner/stg \
+--region us-east4 \
+--staging_location gs://vznet-test/wireline_churn_bq_spanner/stg \
 --temp_location gs://vznet-test/wireline_churn_test/tmp/ \
 --template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_bq_csv
 
+# Run the job
 gcloud dataflow jobs run wireline_churn_bq_spanner1018 \
 --gcs-location gs://vznet-test/wireline_churn_test/code/wireline_churn_bq_csv \
 --region us-east4 \
@@ -70,4 +88,4 @@ gcloud dataflow jobs run wireline_churn_bq_spanner1018 \
 --service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com \
 --parameters \
 input_table=vz-it-np-gudv-dev-vzntdo-0.test_dataset.dim_inventory_customer_profiles_norm_v0,\
-output_path=gs://vznet-test/wireline_churn_test/stg
+output_path=gs://vznet-test/wireline_churn_test/stg/output
