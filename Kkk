@@ -1,8 +1,9 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-import logging
 import argparse
-
+import logging
+import yaml
+logging.getLogger().setLevel(logging.INFO)
 class BQToGCSOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
@@ -19,43 +20,45 @@ class BQToGCSOptions(PipelineOptions):
             type=str,
             help='Output GCS path (e.g., gs://bucket/path/prefix)'
         )
-
+PipelineOptions=''
 def run(argv=None):
     parser = argparse.ArgumentParser()
     known_args, pipeline_args = parser.parse_known_args(argv)
-    
     # Create pipeline options
     pipeline_options = BQToGCSOptions(pipeline_args)
-    
+    logging.log(logging.INFO, "inputttttt_table="+str(pipeline_options.input_table))
+    logging.log(logging.INFO, "outputttttt_path="+str(pipeline_options.output_path))
+# Create your pipeline
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        # Read from BigQuery using ValueProvider
+        # Read data from BigQuery
         data = pipeline | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
-            table=pipeline_options.input_table,
-            use_standard_sql=True
+            query= f"SELECT * FROM `vz-it-np-gudv-dev-vzntdo-0.test_dataset.dim_inventory_customer_profiles_norm_v0`",
+            use_standard_sql=True,
         )
-        
-        # Convert each row to CSV format
-        def row_to_csv(row):
-            return ','.join(str(value) for value in row.values())
-            
-        csv_data = data | 'ConvertToCSV' >> beam.Map(row_to_csv)
-        
-        # Write to GCS using ValueProvider
+        csv_data = data | 'ConvertToCSV' >> beam.Map(lambda row: ','.join(str(x) for x in row.values()))
+        print_data = csv_data | "PrintData" >> beam.Map(lambda element : logging.log(logging.INFO,  "inputttttt_table="+str(pipeline_options.input_table)+"outputttttt_path="+str(pipeline_options.output_path)))
+        # Write data to GCS
         csv_data | 'WriteToGCS' >> beam.io.WriteToText(
-            file_path_prefix=pipeline_options.output_path,
+            f'gs://vznet-test/wireline_churn_test/stg/output.csv',
             file_name_suffix='.csv',
-            num_shards=1
+            header="ont_activation_date, data_circuit_id, circuit_id, video_circuit_id, service_type, address_id, vision_account_id, vision_customer_id, address_type, line_of_business"
         )
-
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
     run()
 
-
-
+it is printing:
+inputttttt_table=RuntimeValueProvider(option: input_table, type: str, default_value: None)outputttttt_path=RuntimeValueProvider(option: output_path, type: str, default_value: None)
+I am submitting job by running below comands:
+python3 /vzwhome/udayka/workspace/wireline_churn_bq_csv.py \
+--project vz-it-np-gudv-dev-vzntdo-0 \
+--runner DataflowRunner \
+--region us-east4 --staging_location gs://vznet-test/wireline_churn_bq_spanner/stg \
+--temp_location gs://vznet-test/wireline_churn_test/tmp/ \
+--template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_bq_csv
 
 gcloud dataflow jobs run wireline_churn_bq_spanner1018 \
---gcs-location gs://vznet-test/wireline_churn_test/code/pipeline \
+--gcs-location gs://vznet-test/wireline_churn_test/code/wireline_churn_bq_csv \
 --region us-east4 \
 --num-workers 2 \
 --max-workers 2 \
@@ -66,5 +69,5 @@ gcloud dataflow jobs run wireline_churn_bq_spanner1018 \
 --subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
 --service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com \
 --parameters \
-input_table=test_dataset.dim_inventory_customer_profiles_norm_v0,\
+input_table=vz-it-np-gudv-dev-vzntdo-0.test_dataset.dim_inventory_customer_profiles_norm_v0,\
 output_path=gs://vznet-test/wireline_churn_test/stg
