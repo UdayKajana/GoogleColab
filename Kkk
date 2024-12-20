@@ -1,99 +1,40 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-import io
-import csv
 import logging
-import uuid
-import yaml
+
+# Set logging level
 logging.getLogger().setLevel(logging.INFO)
-config =''
-with open('/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.yaml', 'r') as config_file:
-    config = yaml.safe_load(config_file)
-project_id  = config['dev']['project'] 
-subscription_id  = config['dev']['subscription_id'] 
-gcs_bucket  = config['dev']['tgt_gcs_bucket'] 
-folder_name = config['dev']['tgt_gcs_folder'] 
-dfregion    = config['dev']['region']  
-dftemp_location = config['dev']['temp_location']
-dfstaging_location = config['dev']['staging_location']
 
-subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
-gcs_output_path = "wireline_churn_test/tgt/customer_profile"
-
-def process_avro_to_csv(message_data):
-    logging.log(logging.INFO, str(message_data))
-    from io import BytesIO
-    import io
-    import fastavro
-    import csv
-    import uuid
-    try:
-        logging.log(logging.INFO, str(BytesIO))
-        # Read Avro data
-        bytes_reader = BytesIO(message_data)
-        avro_reader = fastavro.reader(bytes_reader)
-
-        # Extract records
-        records = [record for record in avro_reader]
-        if not records:
-            logging.warning("No records found in the Avro message.")
-            return None
-
-        # Convert records to CSV format
-        fieldnames = list(records[0].keys())
-        csv_buffer = io.StringIO()
-        writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(records)
-
-        # Generate a unique filename
-        unique_id = uuid.uuid4()
-        filename = f"message_{unique_id}.csv"
-
-        logging.info(f"Processed message into file: {filename}")
-        return filename, csv_buffer.getvalue()
-    except Exception as e:
-        logging.error(f"Error processing Avro message: {e}")
-        return None
-
-def write_csv_to_gcs(element):
-    from apache_beam.io.gcp.gcsio import GcsIO
-    try:
-        filename, csv_data = element
-        if not csv_data:
-            logging.warning(f"No CSV data to write for {filename}. Skipping.")
-            return
-
-        # GCS file path
-        gcs_path = f"gs://{gcs_bucket}/{gcs_output_path}/{filename}"
-
-        # Write CSV data to GCS
-        gcs_io = GcsIO()
-        with gcs_io.open(gcs_path, 'w') as gcs_file:
-            gcs_file.write(csv_data.encode("utf-8"))
-
-        logging.info(f"Successfully wrote {filename} to GCS: {gcs_path}")
-    except Exception as e:
-        logging.error(f"Error writing CSV to GCS: {e}")
+# Define custom options for runtime parameters
+class CustomOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_argument('--project_id', required=True, help='GCP Project ID')
+        parser.add_argument('--input_bq_table', required=True, help='Input BigQuery Table (project.dataset.table)')
+        parser.add_argument('--output_gcs_path', required=True, help='GCS path for the output CSV file')
+        parser.add_argument('--region', required=True, help='Dataflow region')
+        parser.add_argument('--temp_location', required=True, help='Temporary location for Dataflow job')
+        parser.add_argument('--staging_location', required=True, help='Staging location for Dataflow job')
 
 def run_pipeline():
-    # Set pipeline options
-    pipeline_options = PipelineOptions(
-        streaming=True,
-        project=project_id,
-        temp_location= dftemp_location,
-        region= dfregion
-    )
+    # Parse pipeline options
+    pipeline_options = PipelineOptions()
+    custom_options = pipeline_options.view_as(CustomOptions)
 
+    # Print the submitted inputs
+    logging.info("Job Inputs:")
+    logging.info(f"Project ID: {custom_options.project_id}")
+    logging.info(f"Input BigQuery Table: {custom_options.input_bq_table}")
+    logging.info(f"Output GCS Path: {custom_options.output_gcs_path}")
+    logging.info(f"Region: {custom_options.region}")
+    logging.info(f"Temporary Location: {custom_options.temp_location}")
+    logging.info(f"Staging Location: {custom_options.staging_location}")
+
+    # Minimal pipeline definition
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        messages = (pipeline 
-                    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_path)
-                   )
-        csv_files = (messages
-                     | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv)
-                     )
-        _ = (csv_files
-             | "WriteCSVToGCS" >> beam.Map(write_csv_to_gcs))
+        _ = (pipeline 
+             | "CreateDummyPCollection" >> beam.Create([])  # No actual processing
+            )
 
 if __name__ == '__main__':
     run_pipeline()
