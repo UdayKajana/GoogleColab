@@ -1,13 +1,93 @@
-gcloud dataflow jobs run accept_user_input1018 \
---gcs-location gs://vznet-test/wireline_churn_test/code/accept_user_input \
---region us-east4 --num-workers 2 --max-workers 2 --worker-machine-type n2-standard-2 \
---disable-public-ips --network=shared-np-east \
---dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
---subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
---service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com \
---staging_location gs://vznet-test/accept_user_input/stg \
---temp_location gs://vznet-test/wireline_churn_test/tmp/ \
---template_location gs://vznet-test/wireline_churn_test/code/accept_user_input \
---input_bq_table test_dataset.dim_inventory_customer_profiles_norm_v0 \
---output_gcs_path gs://vznet-test/wireline_churn_test/tmp \
---staging_location gs://vznet-test/wireline_churn_test/stg
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.value_provider import ValueProvider
+import logging
+
+logging.getLogger().setLevel(logging.INFO)
+
+class CustomPipelineOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        # Runtime parameters
+        parser.add_value_provider_argument(
+            '--input_bq_table',
+            type=str,
+            help='Input BigQuery Table'
+        )
+        parser.add_value_provider_argument(
+            '--output_gcs_path',
+            type=str,
+            help='Output GCS path'
+        )
+        parser.add_value_provider_argument(
+            '--network',
+            type=str,
+            help='Network'
+        )
+        parser.add_value_provider_argument(
+            '--dataflow_kms_key',
+            type=str,
+            help='Dataflow KMS Key'
+        )
+        parser.add_value_provider_argument(
+            '--subnetwork',
+            type=str,
+            help='Subnetwork'
+        )
+        parser.add_value_provider_argument(
+            '--service_account_email',
+            type=str,
+            help='Service Account Email'
+        )
+        parser.add_value_provider_argument(
+            '--num_workers',
+            type=int,
+            help='Number of workers'
+        )
+        parser.add_value_provider_argument(
+            '--max_workers',
+            type=int,
+            help='Maximum number of workers'
+        )
+        parser.add_value_provider_argument(
+            '--worker_machine_type',
+            type=str,
+            help='Worker machine type'
+        )
+
+class LogParameters(beam.DoFn):
+    def __init__(self, options):
+        self.options = options
+    
+    def process(self, element):
+        logging.info("Runtime Parameter Values:")
+        logging.info(f"Input BigQuery Table: {self.options.input_bq_table.get()}")
+        logging.info(f"Output GCS Path: {self.options.output_gcs_path.get()}")
+        logging.info(f"Network: {self.options.network.get()}")
+        logging.info(f"Dataflow KMS Key: {self.options.dataflow_kms_key.get()}")
+        logging.info(f"Subnetwork: {self.options.subnetwork.get()}")
+        logging.info(f"Service Account Email: {self.options.service_account_email.get()}")
+        logging.info(f"Number of Workers: {self.options.num_workers.get()}")
+        logging.info(f"Max Workers: {self.options.max_workers.get()}")
+        logging.info(f"Worker Machine Type: {self.options.worker_machine_type.get()}")
+        yield element
+
+def run_pipeline():
+    pipeline_options = PipelineOptions()
+    custom_options = pipeline_options.view_as(CustomPipelineOptions)
+
+    # Print static pipeline options at construction time
+    logging.info("Pipeline Construction - Static Parameters:")
+    logging.info(f"Project: {pipeline_options.get_all_options().get('project')}")
+    logging.info(f"Region: {pipeline_options.get_all_options().get('region')}")
+    logging.info(f"Temp Location: {pipeline_options.get_all_options().get('temp_location')}")
+    logging.info(f"Staging Location: {pipeline_options.get_all_options().get('staging_location')}")
+
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        _ = (pipeline 
+             | "Create Initial Element" >> beam.Create([None])
+             | "Log Runtime Parameters" >> beam.ParDo(LogParameters(custom_options))
+            )
+
+if __name__ == '__main__':
+    run_pipeline()
