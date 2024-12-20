@@ -5,40 +5,21 @@ import csv
 import logging
 import uuid
 import argparse
-
 logging.getLogger().setLevel(logging.INFO)
-
+global pipeline_options
 class BQToGCSOptions(PipelineOptions):
     @classmethod
-    def add_argparse_args(cls, parser):
+    def _add_argparse_args(cls, parser):
         parser.add_value_provider_argument(
             '--input_subscription',
             type=str,
-            help='Pub/Sub subscription path'
+            help='pubsub subscription path'
         )
         parser.add_value_provider_argument(
             '--output_path',
             type=str,
             help='Output GCS path (e.g., gs://bucket/path/prefix)'
         )
-
-def subscribe_PubSub_topic(pipeline, input_subscription_path):
-    """
-    Consumes data from the Pub/Sub topic defined by the input_subscription_path.
-    
-    Args:
-        pipeline: The Apache Beam pipeline instance.
-        input_subscription_path: The subscription path for the Pub/Sub topic.
-        
-    Returns:
-        A PCollection of messages consumed from Pub/Sub.
-    """
-    if not input_subscription_path:
-        raise ValueError("Input subscription path is required for subscribing to Pub/Sub.")
-    
-    logging.info(f"Subscribing to Pub/Sub topic: {input_subscription_path}")
-    
-    return pipeline | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=input_subscription_path)
 
 def process_avro_to_csv(message_data):
     logging.log(logging.INFO, str(message_data))
@@ -48,80 +29,68 @@ def process_avro_to_csv(message_data):
     import csv
     import uuid
     try:
+        logging.log(logging.INFO, str(BytesIO))
         # Read Avro data
         bytes_reader = BytesIO(message_data)
         avro_reader = fastavro.reader(bytes_reader)
+
         # Extract records
         records = [record for record in avro_reader]
         if not records:
             logging.warning("No records found in the Avro message.")
             return None
+
         # Convert records to CSV format
         fieldnames = list(records[0].keys())
         csv_buffer = io.StringIO()
         writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(records)
+
         # Generate a unique filename
         unique_id = uuid.uuid4()
         filename = f"message_{unique_id}.csv"
+
         logging.info(f"Processed message into file: {filename}")
         return filename, csv_buffer.getvalue()
     except Exception as e:
         logging.error(f"Error processing Avro message: {e}")
         return None
 
-class WriteToGCS(beam.DoFn):
-    def __init__(self, output_path):
-        self.output_path = output_path
-        
-    def process(self, element):
-        from apache_beam.io.gcp.gcsio import GcsIO
-        try:
-            filename, csv_data = element
-            if not csv_data:
-                logging.warning(f"No CSV data to write for {filename}. Skipping.")
-                return
-            # Get the output path at runtime
-            output_path = self.output_path.get()
-            
-            # Write CSV data to GCS
-            gcs_io = GcsIO()
-            gcs_file_path = f"{output_path}/{filename}"
-            with gcs_io.open(gcs_file_path, 'w') as gcs_file:
-                gcs_file.write(csv_data.encode("utf-8"))
-            logging.info(f"Successfully wrote {filename} to GCS: {gcs_file_path}")
-        except Exception as e:
-            logging.error(f"Error writing CSV to GCS: {e}")
+def write_csv_to_gcs(element):
+    global pipeline_options
+    from apache_beam.io.gcp.gcsio import GcsIO
+    try:
+        filename, csv_data = element
+        if not csv_data:
+            logging.warning(f"No CSV data to write for {filename}. Skipping.")
+            return
 
-def run_pipeline(argv=None):
+        # Write CSV data to GCS
+        gcs_io = GcsIO()
+        with gcs_io.open(pipeline_options.output_path.get(), 'w') as gcs_file:
+            gcs_file.write(csv_data.encode("utf-8"))
+
+        logging.info(f"Successfully wrote {filename} to GCS: {pipeline_options.output_path.get()}")
+    except Exception as e:
+        logging.error(f"Error writing CSV to GCS: {e}")
+
+def run_pipeline(argv = None):
+    global pipeline_options
     parser = argparse.ArgumentParser()
     known_args, pipeline_args = parser.parse_known_args(argv)
     pipeline_options = BQToGCSOptions(pipeline_args)
-
-    # Load the input_subscription from pipeline options
-    input_subscription_path = (
-        pipeline_options.input_subscription.get()
-        if pipeline_options.input_subscription.is_accessible()
-        else None
-    )
-
-    if not input_subscription_path:
-        raise ValueError("Input subscription path must be provided via pipeline options.")
-
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        # Consume data from Pub/Sub
-        messages = subscribe_PubSub_topic(pipeline, input_subscription_path)
-
-        # Process the messages into CSV files
+        subscription_string= pipeline_options.input_subscription.get()
+        messages = (pipeline
+                     
+                    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_string)
+                   )
         csv_files = (messages
-                    | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv)
-                    | "FilterNone" >> beam.Filter(lambda x: x is not None)
-                    )
-        
-        # Write the CSV files to GCS
+                     | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv)
+                     )
         _ = (csv_files
-             | "WriteCSVToGCS" >> beam.ParDo(WriteToGCS(pipeline_options.output_path)))
+             | "WriteCSVToGCS" >> beam.Map(write_csv_to_gcs))
 
 if __name__ == '__main__':
     run_pipeline()
