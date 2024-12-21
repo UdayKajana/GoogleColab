@@ -1,88 +1,60 @@
+mport argparse
+import logging
+
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-import argparse
-import logging
-logging.getLogger().setLevel(logging.INFO)
-class BQToGCSOptions(PipelineOptions):
-    @classmethod
-    def _add_argparse_args(cls, parser):
-        parser.add_value_provider_argument(
-            '--input_table',
-            dest='input_table',
-            type=str,
-            help='Input BigQuery table in format: project_id.dataset_id.table_id'
-        )
-        parser.add_value_provider_argument(
-            '--spanner_instance_id',
-            dest='spanner_instance_id',
-            type=str,
-            help='Spanner instance'
-        )
-        parser.add_value_provider_argument(
-            '--spanner_database_id',
-            dest='spanner_database_id',
-            type=str,
-            help='Spanner database'
-        )
-        parser.add_value_provider_argument(
-            '--spanner_table_id',
-            dest='spanner_table_id',
-            type=str,
-            help='Spanner table'
-        )
+from apache_beam.options.value_provider import ValueProvider
+
+class ValidateSubscription(beam.DoFn):
+    """Validates the subscription string."""
+    def process(self, element, subscription):
+        if not subscription.startswith("projects/") or "/subscriptions/" not in subscription:
+            raise ValueError(f"Invalid subscription format: {subscription}")
+        yield element  # Pass the original element through
 
 def run(argv=None):
+    """Main entry point; defines and runs the pipeline."""
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--input",
+        dest="input",
+        default="gs://your-bucket/input.txt", # Replace with your input
+        help="Input file to process.",
+    )
+    parser.add_argument(
+        "--output",
+        dest="output",
+        required=True,
+        help="Output file to write results to.",
+    )
+    parser.add_argument(
+        "--subscription",
+        dest="subscription",
+        required=True,
+        help="Pub/Sub subscription to read from (e.g., projects/your-project/subscriptions/your-subscription).",
+    )
     known_args, pipeline_args = parser.parse_known_args(argv)
-    pipeline_options = BQToGCSOptions(pipeline_args)
+
+    # Use ValueProvider for runtime parameterization
+    subscription_provider = ValueProvider(
+        lambda: known_args.subscription,  # Lambda to defer evaluation
+        str,
+    )
+    input_provider = ValueProvider(lambda: known_args.input, str)
+
+    pipeline_options = PipelineOptions(pipeline_args)
+
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        data = pipeline | "ReadFromBigQuery" >> beam.io.ReadFromBigQuery(
-            query=f'SELECT * FROM {pipeline_options.input_table.get()}', use_standard_sql=True
-        )
-        data | "PrintData" >> beam.Map(lambda element : logging.log(logging.INFO, "Actual log:"+str(element)))
-        # data | "WriteToSpanner" >> beam.io.WriteToSpanner(
-        #     instance_id=pipeline_options.spanner_instance_id.get(),
-        #     database_id=pipeline_options.spanner_database_id.get(),
-        #     table_id=pipeline_options.spanner_table_id.get(),
-        # )
-if __name__ == '__main__':
-    logging.getLogger().setLevel(logging.INFO)
-    run()
 
-
-import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.options.pipeline_options import SetupOptions
-from apache_beam.io.gcp.pubsub import ReadFromPubSub
-import logging
-
-class CustomOptions(PipelineOptions):
-    @classmethod
-    def _add_argparse_args(cls, parser):
-        parser.add_argument(
-            '--input_subscription',
-            required=True,
-            help='Pub/Sub subscription to read from in the format "projects/<project_id>/subscriptions/<subscription_name>"'
-        )
-        
-
-def run():
-    pipeline_options = PipelineOptions()
-    custom_options = pipeline_options.view_as(CustomOptions)
-    pipeline_options.view_as(SetupOptions).save_main_session = True
-    input_subscription = custom_options.input_subscription
-    if not input_subscription:
-        raise ValueError("The input_subscription parameter must be provided.")
-    else:
-        print(input_subscription)
-
-    # Create the Dataflow pipeline
-    with beam.Pipeline(options=pipeline_options) as pipeline:
+        # Example pipeline that reads from Pub/Sub based on the provided subscription
         messages = (
             pipeline
-            | 'Read from Pub/Sub' >> ReadFromPubSub(subscription=input_subscription)
-            )
-        messages | "PrintData" >> beam.Map(lambda element : logging.log(logging.INFO, "Actual log:"+str(element)))
+            | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_provider)
+            | "Decode" >> beam.Map(lambda x: x.decode()) # Decode from bytes
+            | "ValidateSubscription" >> beam.ParDo(ValidateSubscription(), subscription_provider)
+            | "WriteToText" >> beam.io.WriteToText(known_args.output)
+        )
 
-if __name__ == '__main__':
+if _name_ == "_main_":
+    logging.getLogger().setLevel(logging.INFO)
     run()
