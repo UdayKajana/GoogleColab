@@ -1,59 +1,8 @@
-import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
-import logging
-
-logging.getLogger().setLevel(logging.INFO)
-
-class CustomPipelineOptions(PipelineOptions):
-    @classmethod
-    def _add_argparse_args(cls, parser):
-        parser.add_value_provider_argument('--input_sub', type=str, help='Pub/Sub subscription for input data')
-
-def run():
-    pipeline_options = PipelineOptions()
-    pipeline_options.view_as(StandardOptions).streaming = True
-    custom_options = pipeline_options.view_as(CustomPipelineOptions)
-
-    with beam.Pipeline(options=pipeline_options) as p:
-        (
-            p
-            | 'ReadFromPubSub' >> beam.io.ReadFromPubSub(subscription=custom_options.input_sub)
-            | 'LogMessages' >> beam.Map(lambda x: logging.info(f"Message: {x.decode('utf-8')}"))
-        )
-
-if __name__ == '__main__':
-    run()
-
-
-
-apache-beam[gcp]==2.49.0
-
-
-{
-  "name": "pubsub-to-dataflow-pipeline",
-  "description": "A Flex Template pipeline that reads messages from a Pub/Sub subscription.",
-  "parameters": {
-    "input_sub": {
-      "type": "TEXT",
-      "label": "Input Subscription",
-      "description": "Pub/Sub subscription for input data"
-    }
-  }
-}
-
-
-
-gcloud dataflow flex-template build gs://<your-template-bucket>/flex-template.json \
-    --image gcr.io/dataflow-templates-base/python3 \
-    --sdk-language "PYTHON" \
-    --flex-template-base-image gcr.io/dataflow-templates-base/python3 \
-    --metadata-file template_metadata.json \
-    --requirements-file requirements.txt \
-    --python-file pipeline.py
-
-
-
-gcloud dataflow flex-template run <job-name> \
-    --template-file-gcs-location gs://<your-template-bucket>/flex-template.json \
-    --region <your-region> \
-    --parameters input_sub=projects/<your-project-id>/subscriptions/<your-subscription>
+gcloud dataflow flex-template build gs://vznet-test/avro_to_csv/code/flex-template.json \
+ --image-gcr-path gcr.io/dataflow-templates-base/python3 \
+ --sdk-language "PYTHON" \
+ --flex-template-base-image "PYTHON3" \
+ --metadata-file /vzwhome/udayka/workspace/metadata.json \
+ --py-path /vzwhome/udayka/workspace/ \
+ --env "FLEX_TEMPLATE_PYTHON_PY_FILE=wireline_churn_flex_spanner_gcs.py" \
+ --env "FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE=/vzwhome/udayka/workspace/requirements.txt"
