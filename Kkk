@@ -1,146 +1,47 @@
 import apache_beam as beam
-import logging
-import argparse
-import uuid
-import io
-import csv
-from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.pipeline_options import SetupOptions
 from apache_beam.io.gcp.pubsub import ReadFromPubSub
 
-class CustomPipelineOptions(PipelineOptions):
+class CustomOptions(PipelineOptions):
+    """
+    Custom options to accept user-defined inputs.
+    """
     @classmethod
     def _add_argparse_args(cls, parser):
-        # Runtime parameters
-        parser.add_value_provider_argument(
+        parser.add_argument(
             '--input_subscription',
-            type=str,
-            help='Input subscription in the format projects/PROJECT_ID/subscriptions/SUBSCRIPTION_ID'
+            required=True,
+            help='Pub/Sub subscription to read from in the format "projects/<project_id>/subscriptions/<subscription_name>"'
         )
-        parser.add_value_provider_argument(
-            '--output_path',
-            type=str,
-            help='Output GCS path'
-        )
-
-def process_avro_to_csv(message_data):
-    logging.info(f"Processing message data")
-    from io import BytesIO
-    import fastavro
-    
-    try:
-        bytes_reader = BytesIO(message_data)
-        avro_reader = fastavro.reader(bytes_reader)
-        records = [record for record in avro_reader]
-        
-        if not records:
-            return None
-            
-        fieldnames = list(records[0].keys())
-        csv_buffer = io.StringIO()
-        writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(records)
-        
-        filename = f"output_{uuid.uuid4()}.csv"
-        return (filename, csv_buffer.getvalue())
-        
-    except Exception as e:
-        logging.error(f"Error in process_avro_to_csv: {str(e)}")
-        return None
-
-class WriteToGCSFn(beam.DoFn):
-    def __init__(self, output_path_provider):
-        self.output_path_provider = output_path_provider
-
-    def process(self, element):
-        try:
-            filename, content = element
-            from apache_beam.io.gcp.gcsio import GcsIO
-            
-            output_path = self.output_path_provider.get()
-            full_path = f"{output_path}/{filename}"
-            
-            with GcsIO().open(full_path, 'w') as f:
-                f.write(content.encode('utf-8'))
-                
-            logging.info(f"Written to GCS: {full_path}")
-            yield element
-            
-        except Exception as e:
-            logging.error(f"Error in WriteToGCSFn: {str(e)}")
 
 def run():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--project', required=True)
-    parser.add_argument('--runner', required=True)
-    parser.add_argument('--region', required=True)
-    parser.add_argument('--staging_location', required=True)
-    parser.add_argument('--temp_location', required=True)
-    parser.add_argument('--template_location', required=True)
-    parser.add_argument('--sdk_container_image', required=True)
-    parser.add_argument('--sdk_location', required=True)
+    # Parse pipeline options, including custom options
+    pipeline_options = PipelineOptions()
+    custom_options = pipeline_options.view_as(CustomOptions)
+    pipeline_options.view_as(SetupOptions).save_main_session = True
 
-    known_args, pipeline_args = parser.parse_known_args()
-    
-    # Add known arguments to pipeline_args
-    pipeline_args.extend([
-        f'--project={known_args.project}',
-        f'--runner={known_args.runner}',
-        f'--region={known_args.region}',
-        f'--staging_location={known_args.staging_location}',
-        f'--temp_location={known_args.temp_location}',
-        f'--template_location={known_args.template_location}',
-        '--save_main_session=True'
-    ])
+    # Retrieve the runtime value of the subscription
+    input_subscription = custom_options.input_subscription
 
-    pipeline_options = PipelineOptions(pipeline_args)
-    pipeline_options.view_as(StandardOptions).streaming = True
+    if not input_subscription:
+        raise ValueError("The input_subscription parameter must be provided.")
 
+    # Create the Dataflow pipeline
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        custom_options = pipeline_options.view_as(CustomPipelineOptions)
-
-        messages = (pipeline 
-            | 'Read from PubSub' >> ReadFromPubSub(
-                subscription=custom_options.input_subscription)
-        )
-
-        processed = (messages
-            | 'Process Avro to CSV' >> beam.Map(process_avro_to_csv)
-            | 'Filter None' >> beam.Filter(lambda x: x is not None)
-        )
-
-        _ = (processed 
-            | 'Write to GCS' >> beam.ParDo(WriteToGCSFn(custom_options.output_path))
+        messages = (
+            pipeline
+            | 'Read from Pub/Sub' >> ReadFromPubSub(subscription=input_subscription)
+            | 'Decode Message' >> beam.Map(lambda msg: msg.decode('utf-8'))  # Decode bytes to string
+            | 'Print Messages' >> beam.Map(print)  # Print messages to the console
         )
 
 if __name__ == '__main__':
-    logging.getLogger().setLevel(logging.INFO)
     run()
-
-
-
-python3 wireline_churn_pubsub_csv.py \
---project vz-it-np-gudv-dev-vzntdo-0 \
---runner DataflowRunner \
---region us-east4 \
---staging_location gs://vznet-test/avro_to_csv/staging \
---temp_location gs://vznet-test/avro_to_csv/temp \
---template_location gs://vznet-test/wireline_churn_test/code/avro_to_csv_template \
---sdk_container_image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/beamredis:1.0.0 \
---sdk_location container
-
-
-gcloud dataflow jobs run avro_to_csv_job \
---gcs-location gs://vznet-test/wireline_churn_test/code/avro_to_csv_template \
---region us-east4 \
---num-workers 2 \
---max-workers 2 \
---worker-machine-type n2-standard-2 \
---disable-public-ips \
---network=shared-np-east \
---dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
---subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
---service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com \
---parameters \
-input_subscription=projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/avro_topic_subscription,\
-output_path=gs://vznet-test/avro_to_csv/output
+python your_script_name.py \
+    --runner DataflowRunner \
+    --project <project_id> \
+    --region <region> \
+    --staging_location gs://<your-bucket>/staging/ \
+    --temp_location gs://<your-bucket>/temp/ \
+    --template_location gs://<your-bucket>/templates/pubsub_template
