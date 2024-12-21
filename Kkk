@@ -1,47 +1,58 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.options.pipeline_options import SetupOptions
-from apache_beam.io.gcp.pubsub import ReadFromPubSub
+import logging
+import argparse
 
-class CustomOptions(PipelineOptions):
-    """
-    Custom options to accept user-defined inputs.
-    """
+logging.getLogger().setLevel(logging.INFO)
+
+class PubSubLoggingOptions(PipelineOptions):
     @classmethod
-    def _add_argparse_args(cls, parser):
-        parser.add_argument(
+    def add_argparse_args(cls, parser):
+        parser.add_value_provider_argument(
             '--input_subscription',
-            required=True,
-            help='Pub/Sub subscription to read from in the format "projects/<project_id>/subscriptions/<subscription_name>"'
+            type=str,
+            help='Pub/Sub subscription path'
         )
 
-def run():
-    # Parse pipeline options, including custom options
-    pipeline_options = PipelineOptions()
-    custom_options = pipeline_options.view_as(CustomOptions)
-    pipeline_options.view_as(SetupOptions).save_main_session = True
+def subscribe_PubSub_topic(pipeline, input_subscription_path):
+    """
+    Subscribes to a Pub/Sub topic and logs the received messages.
 
-    # Retrieve the runtime value of the subscription
-    input_subscription = custom_options.input_subscription
+    Args:
+        pipeline: The Apache Beam pipeline instance.
+        input_subscription_path: The Pub/Sub subscription path (as a RuntimeValueProvider).
 
-    if not input_subscription:
-        raise ValueError("The input_subscription parameter must be provided.")
+    Returns:
+        A PCollection of messages consumed from Pub/Sub.
+    """
+    return (
+        pipeline
+        | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=input_subscription_path)
+        | "LogMessages" >> beam.Map(lambda message: logging.info(f"Received message: {message.decode('utf-8')}"))
+    )
 
-    # Create the Dataflow pipeline
+def run_pipeline(argv=None):
+    parser = argparse.ArgumentParser()
+    known_args, pipeline_args = parser.parse_known_args(argv)
+    pipeline_options = PubSubLoggingOptions(pipeline_args)
+
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        messages = (
-            pipeline
-            | 'Read from Pub/Sub' >> ReadFromPubSub(subscription=input_subscription)
-            | 'Decode Message' >> beam.Map(lambda msg: msg.decode('utf-8'))  # Decode bytes to string
-            | 'Print Messages' >> beam.Map(print)  # Print messages to the console
-        )
+        # Subscribe to Pub/Sub and log messages
+        _ = subscribe_PubSub_topic(pipeline, pipeline_options.input_subscription)
 
 if __name__ == '__main__':
-    run()
-python your_script_name.py \
+    run_pipeline()
+
+
+python pipeline.py \
     --runner DataflowRunner \
-    --project <project_id> \
-    --region <region> \
-    --staging_location gs://<your-bucket>/staging/ \
-    --temp_location gs://<your-bucket>/temp/ \
-    --template_location gs://<your-bucket>/templates/pubsub_template
+    --project <your-gcp-project-id> \
+    --region <your-region> \
+    --staging_location gs://<your-bucket>/staging \
+    --temp_location gs://<your-bucket>/temp \
+    --template_location gs://<your-bucket>/templates/pubsub_logging_template
+
+gcloud dataflow jobs run pubsub-logging-job \
+    --gcs-location gs://<your-bucket>/templates/pubsub_logging_template \
+    --region <your-region> \
+    --parameters input_subscription=projects/<your-project-id>/subscriptions/<new-subscription-id>
