@@ -1,47 +1,29 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.io.gcp.pubsub import WriteStringsToPubSub, WriteToPubSub, ReadFromPubSub
-from apache_beam.options.pipeline_options import StandardOptions
-import logging
 import argparse
-
+import logging
 logging.getLogger().setLevel(logging.INFO)
-
-class TemplateOptions(pipelineoptions):
+class BQToGCSOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
-        parser.add_value_provider_argument('--params', type=str)  # not used so far
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--project', dest='project', required=True, help='gcp project id')
-parser.add_argument('--runner', dest='runner', required=False, default="dataflowrunner", help='pipeline runner')
-parser.add_argument('--region', dest='region', required=False, default="us-east4", help='gcp project region')
-parser.add_argument('--staging_location', dest='staging_location', required=True, help='staging gcs bucket path')
-parser.add_argument('--temp_location', dest='temp_location', required=True, help='temp gcs bucket path')
-parser.add_argument('--template_location', dest='template_location', required=True, help='gcs bucket path to save template')
-parser.add_argument('--input_sub', dest='input_sub', required=True, help='input subscription')
-known_args,beam_args = parser.parse_known_args()
-
-options = {
-    'project': known_args.project,
-    'runner': known_args.runner,
-    'region': known_args.region,
-    'staging_location': known_args.staging_location,
-    'temp_location': known_args.temp_location,
-    'template_location': known_args.template_location,
-    'input_sub': known_args.input_sub
-}
-
-pipeline_options = pipelineoptions.from_dictionary(options)
-pipeline_options.view_as(standardoptions).streaming = True
-
-def run_pipeline(pipeline_options):
-    with beam.Pipeline(options=pipeline_options) as p:
-        (
-                p
-                | 'read' >> ReadFromPubSub(subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}")
-                | 'print' >> beam.Map(lambda element: logging.info(str(element)))
+        parser.add_value_provider_argument(
+            '--input_table', #projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/wireline_churn_test_topic-sub
+            type=str,
+            help='Input BigQuery table in format: project_id.dataset_id.table_id'
         )
-
+        parser.add_value_provider_argument(
+            '--output_path',
+            type=str,
+            help='Output GCS path (e.g., gs://bucket/path/prefix)'
+        )
+PipelineOptions=''
+def run(argv=None):
+    parser = argparse.ArgumentParser()
+    known_args, pipeline_args = parser.parse_known_args(argv)
+    pipeline_options = BQToGCSOptions(pipeline_args)
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        messages    = (pipeline | "ReadFromPubSub" >> beam.io.ReadFromPubSub(
+            subscription=pipeline_options.input_table))
 if __name__ == '__main__':
-    run_pipeline(pipeline_options)
+    logging.getLogger().setLevel(logging.INFO)
+    run()
