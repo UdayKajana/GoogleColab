@@ -1,171 +1,41 @@
-import apache_beam as beam
-import logging
-import argparse
-import uuid
-import io
-import csv
-from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
-from apache_beam.io.gcp.pubsub import ReadFromPubSub
-
-class TemplateOptions(PipelineOptions):
-    @classmethod
-    def _add_argparse_args(cls, parser):
-        # Template parameters
-        parser.add_value_provider_argument('--input_subscription', type=str,
-            help='PubSub subscription path')
-        parser.add_value_provider_argument('--output_path', type=str,
-            help='Output GCS path')
-
-def process_avro_to_csv(message_data):
-    logging.info(f"Processing message: {str(message_data)}")
-    from io import BytesIO
-    import fastavro
-    
-    try:
-        # Read Avro data
-        bytes_reader = BytesIO(message_data)
-        avro_reader = fastavro.reader(bytes_reader)
-        
-        records = [record for record in avro_reader]
-        
-        if not records:
-            logging.warning("No records found in the Avro message.")
-            return None
-            
-        # Convert to CSV
-        fieldnames = list(records[0].keys())
-        csv_buffer = io.StringIO()
-        writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(records)
-        
-        unique_id = str(uuid.uuid4())
-        filename = f"message_{unique_id}.csv"
-        
-        return filename, csv_buffer.getvalue()
-        
-    except Exception as e:
-        logging.error(f"Error processing Avro message: {e}")
-        return None
-
-def write_csv_to_gcs(element, output_path):
-    from apache_beam.io.gcp.gcsio import GcsIO
-    
-    try:
-        filename, csv_data = element
-        if not csv_data:
-            return
-            
-        full_path = f"{output_path}/{filename}"
-        gcs_io = GcsIO()
-        with gcs_io.open(full_path, 'w') as gcs_file:
-            gcs_file.write(csv_data.encode('utf-8'))
-            
-        logging.info(f"Successfully wrote {filename} to GCS: {full_path}")
-        
-    except Exception as e:
-        logging.error(f"Error writing to GCS: {e}")
-
-def run(argv=None):
-    parser = argparse.ArgumentParser()
-    
-    # Pipeline configuration arguments
-    parser.add_argument('--project', required=True, help='GCP Project ID')
-    parser.add_argument('--runner', default='DataflowRunner', help='Pipeline runner')
-    parser.add_argument('--region', default='us-east4', help='GCP project region')
-    parser.add_argument('--staging_location', required=True, help='Staging GCS bucket path')
-    parser.add_argument('--temp_location', required=True, help='Temp GCS bucket path')
-    parser.add_argument('--template_location', required=True, help='Template GCS path')
-    parser.add_argument('--setup_file', default='./setup.py', help='Setup file path')
-    parser.add_argument('--sdk_container_image', required=True, help='SDK container image')
-    parser.add_argument('--sdk_location', default='container', help='SDK location')
-
-    known_args, pipeline_args = parser.parse_known_args(argv)
-    
-    # Pipeline options
-    options = {
-        'project': known_args.project,
-        'runner': known_args.runner,
-        'region': known_args.region,
-        'staging_location': known_args.staging_location,
-        'temp_location': known_args.temp_location,
-        'template_location': known_args.template_location,
-        'setup_file': known_args.setup_file,
-        'sdk_container_image': known_args.sdk_container_image,
-        'sdk_location': known_args.sdk_location,
-        'save_main_session': True
-    }
-    
-    pipeline_options = PipelineOptions.from_dictionary(options)
-    pipeline_options.view_as(StandardOptions).streaming = True
-    
-    with beam.Pipeline(options=pipeline_options) as pipeline:
-        messages = (pipeline 
-            | 'ReadFromPubSub' >> ReadFromPubSub(
-                subscription=pipeline_options.view_as(TemplateOptions).input_subscription)
-        )
-        
-        csv_files = (messages 
-            | 'ProcessAvroToCSV' >> beam.Map(process_avro_to_csv)
-            | 'FilterNone' >> beam.Filter(lambda x: x is not None)
-        )
-        
-        _ = (csv_files 
-            | 'WriteToGCS' >> beam.Map(
-                lambda element: write_csv_to_gcs(
-                    element, 
-                    pipeline_options.view_as(TemplateOptions).output_path.get()
-                )
-            )
-        )
-
-if __name__ == '__main__':
-    logging.getLogger().setLevel(logging.INFO)
-    run()
-
-
-python3 dataflow_pipeline.py \
-
+python3  /vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py \
 --project vz-it-np-gudv-dev-vzntdo-0 \
-
 --runner DataflowRunner \
-
 --region us-east4 \
-
 --staging_location gs://vznet-test/avro_to_csv/staging \
-
 --temp_location gs://vznet-test/avro_to_csv/temp \
-
---template_location gs://vznet-test/avro_to_csv/templates/avro_to_csv_template \
-
+--template_location gs://vznet-test/wireline_churn_test/code/ \
 --sdk_container_image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/beamredis:1.0.0 \
-
 --sdk_location container
-
-gcloud dataflow jobs run avro_to_csv_job \
-
---gcs-location gs://vznet-test/avro_to_csv/templates/avro_to_csv_template \
-
+Traceback (most recent call last):
+  File "/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py", line 128, in <module>
+    run_pipeline()
+  File "/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py", line 114, in run_pipeline
+    | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=beam.pvalue.AsSingleton(subscription))
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/gcp/pubsub.py", line 256, in __init__
+    self._source = _PubSubSource(
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/gcp/pubsub.py", line 465, in __init__
+    self.project, self.subscription_name = parse_subscription(subscription)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/gcp/pubsub.py", line 418, in parse_subscription
+    match = re.match(SUBSCRIPTION_REGEXP, full_subscription)
+  File "/usr/lib64/python3.9/re.py", line 191, in match
+    return _compile(pattern, flags).match(string)
+TypeError: expected string or bytes-like object
+(pyvenv39) tpaldgudva001:~$  python3  /vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py \
+--project vz-it-np-gudv-dev-vzntdo-0 \
+--runner DataflowRunner \
 --region us-east4 \
-
---num-workers 2 \
-
---max-workers 2 \
-
---worker-machine-type n2-standard-2 \
-
---disable-public-ips \
-
---network=shared-np-east \
-
---dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
-
---subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
-
---service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com \
-
---parameters \
-
-input_subscription=projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/avro_topic_subscription,\
-
-output_path=gs://vznet-test/avro_to_csv/output
+--staging_location gs://vznet-test/avro_to_csv/staging \
+--temp_location gs://vznet-test/avro_to_csv/temp \
+--template_location gs://vznet-test/wireline_churn_test/code/ \
+--sdk_container_image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/beamredis:1.0.0 \
+--sdk_location container
+Traceback (most recent call last):
+  File "/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py", line 122, in <module>
+    run()
+  File "/vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py", line 103, in run
+    subscription=pipeline_options.view_as(TemplateOptions).input_subscription.get())
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/options/value_provider.py", line 121, in get
+    raise error.RuntimeValueProviderError(
+apache_beam.error.RuntimeValueProviderError: RuntimeValueProvider(option: input_subscription, type: str, default_value: None).get() not called from a runtime context
+(pyvenv39) tpaldgudva001:~$
