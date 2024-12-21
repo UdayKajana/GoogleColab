@@ -1,54 +1,47 @@
-import argparse
-import logging
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.options.value_provider import ValueProvider
-import datetime
+from apache_beam.io.gcp.pubsub import WriteStringsToPubSub, WriteToPubSub, ReadFromPubSub
+from apache_beam.options.pipeline_options import StandardOptions
+import logging
+import argparse
 
-class LogMessageWithDate(beam.DoFn):
-    """Logs the message with a timestamp."""
-    def process(self, message):
-        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_message = f"Message received at {current_time}: {message}"
-        logging.info(log_message)  # Use logging.info for Dataflow logs
-        yield message  # Important to yield the element for downstream processing
+logging.getLogger().setLevel(logging.INFO)
 
-def run(argv=None):
-    """Main entry point; defines and runs the pipeline."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--subscription",
-        dest="subscription",
-        required=True,
-        help="Pub/Sub subscription to read from (e.g., projects/your-project/subscriptions/your-subscription).",
-    )
-    parser.add_argument(
-        "--output",
-        dest="output",
-        required=True,
-        help="Output file to write results to.",
-    )
+class TemplateOptions(pipelineoptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_value_provider_argument('--params', type=str)  # not used so far
 
-    known_args, pipeline_args = parser.parse_known_args(argv)
+parser = argparse.ArgumentParser()
+parser.add_argument('--project', dest='project', required=True, help='gcp project id')
+parser.add_argument('--runner', dest='runner', required=False, default="dataflowrunner", help='pipeline runner')
+parser.add_argument('--region', dest='region', required=False, default="us-east4", help='gcp project region')
+parser.add_argument('--staging_location', dest='staging_location', required=True, help='staging gcs bucket path')
+parser.add_argument('--temp_location', dest='temp_location', required=True, help='temp gcs bucket path')
+parser.add_argument('--template_location', dest='template_location', required=True, help='gcs bucket path to save template')
+parser.add_argument('--input_sub', dest='input_sub', required=True, help='input subscription')
+known_args,beam_args = parser.parse_known_args()
 
-    # Use ValueProvider to defer subscription retrieval
-    subscription_provider = ValueProvider(
-        lambda: known_args.subscription,  # Lambda to defer evaluation
-        str,
-    )
+options = {
+    'project': known_args.project,
+    'runner': known_args.runner,
+    'region': known_args.region,
+    'staging_location': known_args.staging_location,
+    'temp_location': known_args.temp_location,
+    'template_location': known_args.template_location,
+    'input_sub': known_args.input_sub
+}
 
-    pipeline_options = PipelineOptions(pipeline_args)
-    pipeline_options.view_as(beam.options.pipeline_options.StandardOptions).streaming = True
+pipeline_options = pipelineoptions.from_dictionary(options)
+pipeline_options.view_as(standardoptions).streaming = True
 
-    with beam.Pipeline(options=pipeline_options) as pipeline:
-        messages = (
-            pipeline
-            | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_provider)
-            | "Decode" >> beam.Map(lambda x: x.decode())
-            | "LogMessageWithDate" >> beam.ParDo(LogMessageWithDate())
-            | "WriteToText" >> beam.io.WriteToText(known_args.output)
+def run_pipeline(pipeline_options):
+    with beam.Pipeline(options=pipeline_options) as p:
+        (
+                p
+                | 'read' >> ReadFromPubSub(subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}")
+                | 'print' >> beam.Map(lambda element: logging.info(str(element)))
         )
 
-if __name__ == "__main__":
-    logging.getLogger().setLevel(logging.INFO)  # Set logging level
-    run()
+if __name__ == '__main__':
+    run_pipeline(pipeline_options)
