@@ -1,4 +1,71 @@
 import apache_beam as beam
+import json
+import common_deps.common_echo as commonecho
+import common_deps.echo_tkt as echo
+from apache_beam.io import BigQueryDisposition
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.io.gcp.pubsub import WriteStringsToPubSub, WriteToPubSub, ReadFromPubSub
+from apache_beam.options.pipeline_options import StandardOptions
+import common_deps.mapComonEchoToBq as bq
+import common_deps.schema_utils as schutils
+
+import argparse
+import logging
+
+class TemplateOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_value_provider_argument('--params', type=str)  # Not used so far
+
+
+logging.getLogger().setLevel(logging.ERROR)
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
+parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
+parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
+parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
+parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
+parser.add_argument('--template_location', dest='template_location', required=True,
+                    help='GCS bucket path to save template')
+parser.add_argument('--input_sub', dest='input_sub', required=True, help='Input Subscription')
+parser.add_argument('--echo_opened_output_topic', dest='echo_opened_output_topic', required=False, help='Pubsub output topic name')
+parser.add_argument('--echo_closed_output_topic', dest='echo_closed_output_topic', required=False, help='Pubsub output topic name')
+parser.add_argument('--echo_ticket_activity_logs_topic',dest='echo_ticket_activity_logs_topic', required=False, help='Pubsub activity logs topic name')
+parser.add_argument('--common_echo_opened_output_table', dest='common_echo_opened_output_table', required=False, help='common echo output opened table name')
+parser.add_argument('--common_echo_closed_output_table', dest='common_echo_closed_output_table', required=False, help='common echo closed output closed name')
+parser.add_argument('--common_echo_activity_log_output_table', dest='common_echo_activity_log_output_table', required=False, help='common echo activity log output closed name')
+parser.add_argument('--setup_file', dest='setup_file', default='./setup.py', required=False, help='setup_file')
+parser.add_argument('--sdk_container_image',dest='sdk_container_image',default='us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/beamredis:1.0.0',required=True, help='SDK COntainer image')
+parser.add_argument('--sdk_location',dest='sdk_location',default='container',required=True, help='container')
+parser.add_argument('--pem_file',dest='pem_file',default='/opt/cacerts/server-ca.pem',required=True, help='Pem file path in image')
+parser.add_argument('--quarentine_table',dest='quarentine_table',default="vz-it-np-gudv-dev-vzntdo-0:vzn_nsdl_common_tbls.data_processing_errors",required=True, help='QuarantineTable')
+parser.add_argument('--json_config', dest='json_config', required=True,default="gs://vznet/scala-artifacts/sinsh9t/dataflow/config", help='json_config path')
+
+known_args,beam_args = parser.parse_known_args()
+
+options = {
+    'project': known_args.project,
+    'runner': known_args.runner,
+    'region': known_args.region,
+    'staging_location': known_args.staging_location,
+    'temp_location': known_args.temp_location,
+    'template_location': known_args.template_location,
+    'save_main_session': True,
+    'setup_file': known_args.setup_file,
+    'sdk_container_image':known_args.sdk_container_image,
+    'sdk_location':known_args.sdk_location
+
+}
+pipeline_options = PipelineOptions.from_dictionary(options)
+pipeline_options.view_as(StandardOptions).streaming = True
+p = beam.Pipeline(options=pipeline_options)
+
+
+
+this is the code I have which takes athe user input provided detaile, I want to encorporate avobe logic to take the user input (what ever are needed) and runt below logic
+
+import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
 import io
 import csv
@@ -127,3 +194,32 @@ def run_pipeline(argv=None):
 if __name__ == '__main__':
     run_pipeline()
 
+
+please take the user input for template and pipeline should parse thema nd connect and process the data. all gcs bucket, floder and pubsub subscription path should bepassed by user when the template is being  triggered.in
+    please send the template creation and template run commands as like below:
+
+python3 /vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py \
+--project vz-it-np-gudv-dev-vzntdo-0 \
+--runner DataflowRunner \
+--region us-east4 --staging_location gs://vznet-test/wireline_churn_bq_spanner/stg \
+--temp_location gs://vznet-test/wireline_churn_test/tmp/ \
+--template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv \
+--parameters \
+input_subscription=projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/wireline_churn_test_topic-sub,\
+output_path=gs://vznet-test/wireline_churn_test/stg
+
+running the template:
+gcloud dataflow jobs run wireline_churn_bq_spanner1018 \
+--gcs-location gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv \
+--region us-east4 \
+--num-workers 2 \
+--max-workers 2 \
+--worker-machine-type n2-standard-2 \
+--disable-public-ips \
+--network=shared-np-east \
+--dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
+--subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
+--service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com \
+--parameters \
+input_subscription=projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/wireline_churn_test_topic-sub,\
+output_path=gs://vznet-test/wireline_churn_test/stg
