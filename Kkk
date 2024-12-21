@@ -1,58 +1,88 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-import logging
 import argparse
-
+import logging
 logging.getLogger().setLevel(logging.INFO)
-
-class PubSubLoggingOptions(PipelineOptions):
+class BQToGCSOptions(PipelineOptions):
     @classmethod
-    def add_argparse_args(cls, parser):
+    def _add_argparse_args(cls, parser):
         parser.add_value_provider_argument(
-            '--input_subscription',
+            '--input_table',
+            dest='input_table',
             type=str,
-            help='Pub/Sub subscription path'
+            help='Input BigQuery table in format: project_id.dataset_id.table_id'
+        )
+        parser.add_value_provider_argument(
+            '--spanner_instance_id',
+            dest='spanner_instance_id',
+            type=str,
+            help='Spanner instance'
+        )
+        parser.add_value_provider_argument(
+            '--spanner_database_id',
+            dest='spanner_database_id',
+            type=str,
+            help='Spanner database'
+        )
+        parser.add_value_provider_argument(
+            '--spanner_table_id',
+            dest='spanner_table_id',
+            type=str,
+            help='Spanner table'
         )
 
-def subscribe_PubSub_topic(pipeline, input_subscription_path):
-    """
-    Subscribes to a Pub/Sub topic and logs the received messages.
-
-    Args:
-        pipeline: The Apache Beam pipeline instance.
-        input_subscription_path: The Pub/Sub subscription path (as a RuntimeValueProvider).
-
-    Returns:
-        A PCollection of messages consumed from Pub/Sub.
-    """
-    return (
-        pipeline
-        | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=input_subscription_path)
-        | "LogMessages" >> beam.Map(lambda message: logging.info(f"Received message: {message.decode('utf-8')}"))
-    )
-
-def run_pipeline(argv=None):
+def run(argv=None):
     parser = argparse.ArgumentParser()
     known_args, pipeline_args = parser.parse_known_args(argv)
-    pipeline_options = PubSubLoggingOptions(pipeline_args)
-
+    pipeline_options = BQToGCSOptions(pipeline_args)
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        # Subscribe to Pub/Sub and log messages
-        _ = subscribe_PubSub_topic(pipeline, pipeline_options.input_subscription)
+        data = pipeline | "ReadFromBigQuery" >> beam.io.ReadFromBigQuery(
+            query=f'SELECT * FROM {pipeline_options.input_table.get()}', use_standard_sql=True
+        )
+        data | "PrintData" >> beam.Map(lambda element : logging.log(logging.INFO, "Actual log:"+str(element)))
+        # data | "WriteToSpanner" >> beam.io.WriteToSpanner(
+        #     instance_id=pipeline_options.spanner_instance_id.get(),
+        #     database_id=pipeline_options.spanner_database_id.get(),
+        #     table_id=pipeline_options.spanner_table_id.get(),
+        # )
+if __name__ == '__main__':
+    logging.getLogger().setLevel(logging.INFO)
+    run()
+
+
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.pipeline_options import SetupOptions
+from apache_beam.io.gcp.pubsub import ReadFromPubSub
+import logging
+
+class CustomOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_argument(
+            '--input_subscription',
+            required=True,
+            help='Pub/Sub subscription to read from in the format "projects/<project_id>/subscriptions/<subscription_name>"'
+        )
+        
+
+def run():
+    pipeline_options = PipelineOptions()
+    custom_options = pipeline_options.view_as(CustomOptions)
+    pipeline_options.view_as(SetupOptions).save_main_session = True
+    input_subscription = custom_options.input_subscription
+    if not input_subscription:
+        raise ValueError("The input_subscription parameter must be provided.")
+    else:
+        print(input_subscription)
+
+    # Create the Dataflow pipeline
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        messages = (
+            pipeline
+            | 'Read from Pub/Sub' >> ReadFromPubSub(subscription=input_subscription)
+            )
+        messages | "PrintData" >> beam.Map(lambda element : logging.log(logging.INFO, "Actual log:"+str(element)))
 
 if __name__ == '__main__':
-    run_pipeline()
-
-
-python pipeline.py \
-    --runner DataflowRunner \
-    --project <your-gcp-project-id> \
-    --region <your-region> \
-    --staging_location gs://<your-bucket>/staging \
-    --temp_location gs://<your-bucket>/temp \
-    --template_location gs://<your-bucket>/templates/pubsub_logging_template
-
-gcloud dataflow jobs run pubsub-logging-job \
-    --gcs-location gs://<your-bucket>/templates/pubsub_logging_template \
-    --region <your-region> \
-    --parameters input_subscription=projects/<your-project-id>/subscriptions/<new-subscription-id>
+    run()
