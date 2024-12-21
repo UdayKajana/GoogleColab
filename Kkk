@@ -58,3 +58,12 @@ def run(argv=None):
 if _name_ == "_main_":
     logging.getLogger().setLevel(logging.INFO)
     run()
+
+
+gcloud dataflow jobs run pubsub-validation-template \
+  --gcs-location gs://your-bucket/staging/pubsub_validation_template.py \
+  --region <your-region> \
+  --parameters input=gs://your-bucket/input.txt,output=gs://your-bucket/output.txt,subscription=projects/your-project/subscriptions/your-subscription \
+  --temp-location gs://your-bucket/temp/ \
+  --staging-location gs://your-bucket/staging/ \
+  --sdk-container-image gcr.io/apache-beam/python3.10-sdk:latest
