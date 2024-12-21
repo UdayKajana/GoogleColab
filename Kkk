@@ -1,25 +1,26 @@
-mport argparse
+import argparse
 import logging
-
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.options.value_provider import ValueProvider
+import datetime
 
-class ValidateSubscription(beam.DoFn):
-    """Validates the subscription string."""
-    def process(self, element, subscription):
-        if not subscription.startswith("projects/") or "/subscriptions/" not in subscription:
-            raise ValueError(f"Invalid subscription format: {subscription}")
-        yield element  # Pass the original element through
+class LogMessageWithDate(beam.DoFn):
+    """Logs the message with a timestamp."""
+    def process(self, message):
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_message = f"Message received at {current_time}: {message}"
+        logging.info(log_message)  # Use logging.info for Dataflow logs
+        yield message  # Important to yield the element for downstream processing
 
 def run(argv=None):
     """Main entry point; defines and runs the pipeline."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--input",
-        dest="input",
-        default="gs://your-bucket/input.txt", # Replace with your input
-        help="Input file to process.",
+        "--subscription",
+        dest="subscription",
+        required=True,
+        help="Pub/Sub subscription to read from (e.g., projects/your-project/subscriptions/your-subscription).",
     )
     parser.add_argument(
         "--output",
@@ -27,43 +28,27 @@ def run(argv=None):
         required=True,
         help="Output file to write results to.",
     )
-    parser.add_argument(
-        "--subscription",
-        dest="subscription",
-        required=True,
-        help="Pub/Sub subscription to read from (e.g., projects/your-project/subscriptions/your-subscription).",
-    )
+
     known_args, pipeline_args = parser.parse_known_args(argv)
 
-    # Use ValueProvider for runtime parameterization
+    # Use ValueProvider to defer subscription retrieval
     subscription_provider = ValueProvider(
         lambda: known_args.subscription,  # Lambda to defer evaluation
         str,
     )
-    input_provider = ValueProvider(lambda: known_args.input, str)
 
     pipeline_options = PipelineOptions(pipeline_args)
+    pipeline_options.view_as(beam.options.pipeline_options.StandardOptions).streaming = True
 
     with beam.Pipeline(options=pipeline_options) as pipeline:
-
-        # Example pipeline that reads from Pub/Sub based on the provided subscription
         messages = (
             pipeline
             | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=subscription_provider)
-            | "Decode" >> beam.Map(lambda x: x.decode()) # Decode from bytes
-            | "ValidateSubscription" >> beam.ParDo(ValidateSubscription(), subscription_provider)
+            | "Decode" >> beam.Map(lambda x: x.decode())
+            | "LogMessageWithDate" >> beam.ParDo(LogMessageWithDate())
             | "WriteToText" >> beam.io.WriteToText(known_args.output)
         )
 
-if _name_ == "_main_":
-    logging.getLogger().setLevel(logging.INFO)
+if __name__ == "__main__":
+    logging.getLogger().setLevel(logging.INFO)  # Set logging level
     run()
-
-
-gcloud dataflow jobs run pubsub-validation-template \
-  --gcs-location gs://your-bucket/staging/pubsub_validation_template.py \
-  --region <your-region> \
-  --parameters input=gs://your-bucket/input.txt,output=gs://your-bucket/output.txt,subscription=projects/your-project/subscriptions/your-subscription \
-  --temp-location gs://your-bucket/temp/ \
-  --staging-location gs://your-bucket/staging/ \
-  --sdk-container-image gcr.io/apache-beam/python3.10-sdk:latest
