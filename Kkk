@@ -1,225 +1,171 @@
 import apache_beam as beam
-import json
-import common_deps.common_echo as commonecho
-import common_deps.echo_tkt as echo
-from apache_beam.io import BigQueryDisposition
-from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.io.gcp.pubsub import WriteStringsToPubSub, WriteToPubSub, ReadFromPubSub
-from apache_beam.options.pipeline_options import StandardOptions
-import common_deps.mapComonEchoToBq as bq
-import common_deps.schema_utils as schutils
-
-import argparse
 import logging
+import argparse
+import uuid
+import io
+import csv
+from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
+from apache_beam.io.gcp.pubsub import ReadFromPubSub
 
 class TemplateOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
-        parser.add_value_provider_argument('--params', type=str)  # Not used so far
-
-
-logging.getLogger().setLevel(logging.ERROR)
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
-parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
-parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
-parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
-parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
-parser.add_argument('--template_location', dest='template_location', required=True,
-                    help='GCS bucket path to save template')
-parser.add_argument('--input_sub', dest='input_sub', required=True, help='Input Subscription')
-parser.add_argument('--echo_opened_output_topic', dest='echo_opened_output_topic', required=False, help='Pubsub output topic name')
-parser.add_argument('--echo_closed_output_topic', dest='echo_closed_output_topic', required=False, help='Pubsub output topic name')
-parser.add_argument('--echo_ticket_activity_logs_topic',dest='echo_ticket_activity_logs_topic', required=False, help='Pubsub activity logs topic name')
-parser.add_argument('--common_echo_opened_output_table', dest='common_echo_opened_output_table', required=False, help='common echo output opened table name')
-parser.add_argument('--common_echo_closed_output_table', dest='common_echo_closed_output_table', required=False, help='common echo closed output closed name')
-parser.add_argument('--common_echo_activity_log_output_table', dest='common_echo_activity_log_output_table', required=False, help='common echo activity log output closed name')
-parser.add_argument('--setup_file', dest='setup_file', default='./setup.py', required=False, help='setup_file')
-parser.add_argument('--sdk_container_image',dest='sdk_container_image',default='us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/beamredis:1.0.0',required=True, help='SDK COntainer image')
-parser.add_argument('--sdk_location',dest='sdk_location',default='container',required=True, help='container')
-parser.add_argument('--pem_file',dest='pem_file',default='/opt/cacerts/server-ca.pem',required=True, help='Pem file path in image')
-parser.add_argument('--quarentine_table',dest='quarentine_table',default="vz-it-np-gudv-dev-vzntdo-0:vzn_nsdl_common_tbls.data_processing_errors",required=True, help='QuarantineTable')
-parser.add_argument('--json_config', dest='json_config', required=True,default="gs://vznet/scala-artifacts/sinsh9t/dataflow/config", help='json_config path')
-
-known_args,beam_args = parser.parse_known_args()
-
-options = {
-    'project': known_args.project,
-    'runner': known_args.runner,
-    'region': known_args.region,
-    'staging_location': known_args.staging_location,
-    'temp_location': known_args.temp_location,
-    'template_location': known_args.template_location,
-    'save_main_session': True,
-    'setup_file': known_args.setup_file,
-    'sdk_container_image':known_args.sdk_container_image,
-    'sdk_location':known_args.sdk_location
-
-}
-pipeline_options = PipelineOptions.from_dictionary(options)
-pipeline_options.view_as(StandardOptions).streaming = True
-p = beam.Pipeline(options=pipeline_options)
-
-
-
-this is the code I have which takes athe user input provided detaile, I want to encorporate avobe logic to take the user input (what ever are needed) and runt below logic
-
-import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions
-import io
-import csv
-import logging
-import uuid
-import argparse
-
-logging.getLogger().setLevel(logging.INFO)
-
-global pipeline_options
-
-class BQToGCSOptions(PipelineOptions):
-    @classmethod
-    def _add_argparse_args(cls, parser):
-        parser.add_value_provider_argument(
-            '--input_subscription',
-            type=str,
-            help='PubSub subscription path (e.g., projects/YOUR_PROJECT_ID/subscriptions/YOUR_SUBSCRIPTION_NAME)'
-        )
-        parser.add_value_provider_argument(
-            '--output_path',
-            type=str,
-            help='Output GCS path (e.g., gs://bucket/path/prefix)'
-        )
+        # Template parameters
+        parser.add_value_provider_argument('--input_subscription', type=str,
+            help='PubSub subscription path')
+        parser.add_value_provider_argument('--output_path', type=str,
+            help='Output GCS path')
 
 def process_avro_to_csv(message_data):
-    logging.log(logging.INFO, str(message_data))
+    logging.info(f"Processing message: {str(message_data)}")
     from io import BytesIO
     import fastavro
-    import csv
-    import uuid
-
+    
     try:
         # Read Avro data
         bytes_reader = BytesIO(message_data)
         avro_reader = fastavro.reader(bytes_reader)
-
-        # Extract records
+        
         records = [record for record in avro_reader]
-
+        
         if not records:
             logging.warning("No records found in the Avro message.")
             return None
-
-        # Convert records to CSV format
+            
+        # Convert to CSV
         fieldnames = list(records[0].keys())
         csv_buffer = io.StringIO()
         writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(records)
-
-        # Generate a unique filename
-        unique_id = uuid.uuid4()
+        
+        unique_id = str(uuid.uuid4())
         filename = f"message_{unique_id}.csv"
-        logging.info(f"Processed message into file: {filename}")
-
+        
         return filename, csv_buffer.getvalue()
-
+        
     except Exception as e:
         logging.error(f"Error processing Avro message: {e}")
         return None
 
-def write_csv_to_gcs(element):
-    global pipeline_options
+def write_csv_to_gcs(element, output_path):
     from apache_beam.io.gcp.gcsio import GcsIO
-
+    
     try:
         filename, csv_data = element
-
         if not csv_data:
-            logging.warning(f"No CSV data to write for {filename}. Skipping.")
             return
-
-        # Write CSV data to GCS
+            
+        full_path = f"{output_path}/{filename}"
         gcs_io = GcsIO()
-        with gcs_io.open(pipeline_options.output_path.get(), 'w') as gcs_file:
-            gcs_file.write(csv_data.encode("utf-8"))
-
-        logging.info(f"Successfully wrote {filename} to GCS: {pipeline_options.output_path.get()}")
-
+        with gcs_io.open(full_path, 'w') as gcs_file:
+            gcs_file.write(csv_data.encode('utf-8'))
+            
+        logging.info(f"Successfully wrote {filename} to GCS: {full_path}")
+        
     except Exception as e:
-        logging.error(f"Error writing CSV to GCS: {e}")
+        logging.error(f"Error writing to GCS: {e}")
 
-# Create a DoFn to extract the subscription string
-class ExtractSubscription(beam.DoFn):
-    def process(self, element):
-        # Yield the subscription string
-        yield element
-
-def run_pipeline(argv=None):
-    global pipeline_options
+def run(argv=None):
     parser = argparse.ArgumentParser()
-    known_args, pipeline_args = parser.parse_known_args(argv)
-    pipeline_options = BQToGCSOptions(pipeline_args)
+    
+    # Pipeline configuration arguments
+    parser.add_argument('--project', required=True, help='GCP Project ID')
+    parser.add_argument('--runner', default='DataflowRunner', help='Pipeline runner')
+    parser.add_argument('--region', default='us-east4', help='GCP project region')
+    parser.add_argument('--staging_location', required=True, help='Staging GCS bucket path')
+    parser.add_argument('--temp_location', required=True, help='Temp GCS bucket path')
+    parser.add_argument('--template_location', required=True, help='Template GCS path')
+    parser.add_argument('--setup_file', default='./setup.py', help='Setup file path')
+    parser.add_argument('--sdk_container_image', required=True, help='SDK container image')
+    parser.add_argument('--sdk_location', default='container', help='SDK location')
 
-    # Start the pipeline
+    known_args, pipeline_args = parser.parse_known_args(argv)
+    
+    # Pipeline options
+    options = {
+        'project': known_args.project,
+        'runner': known_args.runner,
+        'region': known_args.region,
+        'staging_location': known_args.staging_location,
+        'temp_location': known_args.temp_location,
+        'template_location': known_args.template_location,
+        'setup_file': known_args.setup_file,
+        'sdk_container_image': known_args.sdk_container_image,
+        'sdk_location': known_args.sdk_location,
+        'save_main_session': True
+    }
+    
+    pipeline_options = PipelineOptions.from_dictionary(options)
+    pipeline_options.view_as(StandardOptions).streaming = True
+    
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        # Create a single element PCollection with the input subscription
-        subscription = (
-            pipeline
-            | "CreateInputSubscription" >> beam.Create([pipeline_options.input_subscription])
+        messages = (pipeline 
+            | 'ReadFromPubSub' >> ReadFromPubSub(
+                subscription=pipeline_options.view_as(TemplateOptions).input_subscription)
         )
         
-        # Extract the subscription
-        subscription = (
-            subscription
-            | "ExtractSubscription" >> beam.ParDo(ExtractSubscription())
+        csv_files = (messages 
+            | 'ProcessAvroToCSV' >> beam.Map(process_avro_to_csv)
+            | 'FilterNone' >> beam.Filter(lambda x: x is not None)
         )
-
-        # Use the subscription in the ReadFromPubSub task
-        messages = (
-            subscription
-            | "ReadFromPubSub" >> beam.io.ReadFromPubSub(subscription=beam.pvalue.AsSingleton(subscription))
-        )
-
-        csv_files = (
-            messages
-            | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv)
-        )
-
-        _ = (
-            csv_files
-            | "WriteCSVToGCS" >> beam.Map(write_csv_to_gcs)
+        
+        _ = (csv_files 
+            | 'WriteToGCS' >> beam.Map(
+                lambda element: write_csv_to_gcs(
+                    element, 
+                    pipeline_options.view_as(TemplateOptions).output_path.get()
+                )
+            )
         )
 
 if __name__ == '__main__':
-    run_pipeline()
+    logging.getLogger().setLevel(logging.INFO)
+    run()
 
 
-please take the user input for template and pipeline should parse thema nd connect and process the data. all gcs bucket, floder and pubsub subscription path should bepassed by user when the template is being  triggered.in
-    please send the template creation and template run commands as like below:
+python3 dataflow_pipeline.py \
 
-python3 /vzwhome/udayka/workspace/wireline_churn_pubsub_csv.py \
 --project vz-it-np-gudv-dev-vzntdo-0 \
---runner DataflowRunner \
---region us-east4 --staging_location gs://vznet-test/wireline_churn_bq_spanner/stg \
---temp_location gs://vznet-test/wireline_churn_test/tmp/ \
---template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv \
---parameters \
-input_subscription=projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/wireline_churn_test_topic-sub,\
-output_path=gs://vznet-test/wireline_churn_test/stg
 
-running the template:
-gcloud dataflow jobs run wireline_churn_bq_spanner1018 \
---gcs-location gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv \
+--runner DataflowRunner \
+
 --region us-east4 \
+
+--staging_location gs://vznet-test/avro_to_csv/staging \
+
+--temp_location gs://vznet-test/avro_to_csv/temp \
+
+--template_location gs://vznet-test/avro_to_csv/templates/avro_to_csv_template \
+
+--sdk_container_image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/beamredis:1.0.0 \
+
+--sdk_location container
+
+gcloud dataflow jobs run avro_to_csv_job \
+
+--gcs-location gs://vznet-test/avro_to_csv/templates/avro_to_csv_template \
+
+--region us-east4 \
+
 --num-workers 2 \
+
 --max-workers 2 \
+
 --worker-machine-type n2-standard-2 \
+
 --disable-public-ips \
+
 --network=shared-np-east \
+
 --dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
+
 --subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
+
 --service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com \
+
 --parameters \
-input_subscription=projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/wireline_churn_test_topic-sub,\
-output_path=gs://vznet-test/wireline_churn_test/stg
+
+input_subscription=projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/avro_topic_subscription,\
+
+output_path=gs://vznet-test/avro_to_csv/output
