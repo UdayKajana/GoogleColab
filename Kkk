@@ -1,4 +1,4 @@
-gcloud dataflow flex-template build gs://vznet-test/avro_to_csv/code/flex-template.json \
+gcloud dataflow flex-template build gs://vznet-test/avro_to_csv/code/ \
  --image-gcr-path gcr.io/dataflow-templates-base/python3 \
  --sdk-language "PYTHON" \
  --flex-template-base-image "PYTHON3" \
@@ -6,3 +6,28 @@ gcloud dataflow flex-template build gs://vznet-test/avro_to_csv/code/flex-templa
  --py-path /vzwhome/udayka/workspace/ \
  --env "FLEX_TEMPLATE_PYTHON_PY_FILE=wireline_churn_flex_spanner_gcs.py" \
  --env "FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE=/vzwhome/udayka/workspace/requirements.txt"
+Copying files to a temp directory /tmp/tmp9pm52oi6
+Generating dockerfile to build the flex template container image...
+Generated Dockerfile. Contents:
+FROM gcr.io/dataflow-templates-base/python3-template-launcher-base:latest
+
+ENV FLEX_TEMPLATE_PYTHON_PY_FILE=/template/wireline_churn_flex_spanner_gcs.py
+ENV FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE=/template//vzwhome/udayka/workspace/requirements.txt
+
+COPY workspace /template/
+
+RUN apt-get update && apt-get install -y libffi-dev git && rm -rf /var/lib/apt/lists/* && pip install --no-cache-dir -U -r /template//vzwhome/udayka/workspace/requirements.txt && (pip check || (e=$?; echo "Building a container with incompatible dependencies is prevented by default. If you are sure you want to proceed, you need to create your own container image. See: https://cloud.google.com/dataflow/docs/guides/templates/configuring-flex-templates"; exit $e))
+
+Creating temporary archive of 14 file(s) totalling 19.0 KiB before compression.
+Uploading tarball of [/tmp/tmp9pm52oi6] to [gs://vz-it-np-gudv-dev-vzntdo-0_cloudbuild/source/1734799263.884797-387763388fbb4dfc992d9f7bf9e00b63.tgz]
+Pushing flex template container image to GCR...
+Created [https://cloudbuild.googleapis.com/v1/projects/vz-it-np-gudv-dev-vzntdo-0/locations/global/builds/7454d549-cd7c-4ef6-9762-418057c457ed].
+Logs are available at [ https://console.cloud.google.com/cloud-build/builds/7454d549-cd7c-4ef6-9762-418057c457ed?project=206482042907 ].
+Waiting for build to complete. Polling interval: 1 second(s).
+ERROR: (gcloud.dataflow.flex-template.build)
+The build is running, and logs are being written to the default logs bucket.
+This tool can only stream logs if you are Viewer/Owner of the project and, if applicable, allowed by your VPC-SC security policy.
+
+The default logs bucket is always outside any VPC-SC security perimeter.
+If you want your logs saved inside your VPC-SC perimeter, use your own bucket.
+See https://cloud.google.com/build/docs/securing-builds/store-manage-build-logs.
