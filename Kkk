@@ -1,4 +1,3 @@
-This is the code to push data to pubsub:
 import json
 import avro.io as avro_io
 import avro.schema
@@ -34,14 +33,29 @@ def pushToTopic(data_rows, topic_name):
     def callback(publish_future: pubsub_v1.publisher.futures.Future) -> None:
         message_id = publish_future.result()
         # print(message_id)
-    publish_future = publisher.publish(topic_path, data_rows)
-    print(publish_future)
-    # future.result(timeout=10)
-    # Non-blocking. Allow the publisher client to batch messages.
-    publish_future.add_done_callback(callback)
-    publish_futures.append(publish_future)
-    print(f"Published messages with flow control settings to {topic_path}.")
 
+    # Publish 1000 messages in quick succession may be constrained by
+    # publisher flow control.
+    # for n in range(1, 6):
+    for d in data_rows:
+        # Data must be a bytestring
+        if isinstance(d, bytes):
+            data = d
+        else:
+            print("dec")
+            data = d.encode("utf-8")
+        # print(data)
+        publish_future = publisher.publish(topic_path, data)
+        print(publish_future)
+        # future.result(timeout=10)
+        # Non-blocking. Allow the publisher client to batch messages.
+        publish_future.add_done_callback(callback)
+        publish_futures.append(publish_future)
+
+    futures.wait(publish_futures, return_when=futures.ALL_COMPLETED)
+
+    print(f"Published messages with flow control settings to {topic_path}.")
+    
 def EncodeAvro(element):
     def encode(data: dict) -> bytes:
         schema = """{"namespace": "com.vz.vznet",
@@ -111,109 +125,46 @@ pipTopologySrc = {
              "address_type" : "SFU",
              "line_of_business" : "Residence"
          }
-        },
-        {"src": "vz.pip.eclipse.stat.if_stats.proc.v0", 
-         "timestamp": 1563152004139, 
-         "host": "TEST-1234-XYZ",
-         "ingressTimestamp": 1563153004139, 
-         "fetchTimestamp": 1563153008139, 
-         "origins": ["vmb,kafka,ENMV.PIP.IP"],
-         "tags": [], 
-         "route": 3,
-         "rawdata": {
-                "ont_activation_date": "2022-12-02 05:00:00.000000 UTC",
-                "data_circuit_id" : "IbO+zFtdYczFOgBHOkiNNINdZtJpvQClHr6diOckccWWcteRkgJaxL25j3K1OjH9dbrLAUWR2Jd1kDoN44TJug==",
-                "circuit_id" : "LGF8pf4gkOZcABnNq9NMxNcE/U2Gc0B3trVK0hEzNp7v5Z7ONCJVcILwpbzVuqyOFxz2XIU/rjOerp6NEmjmnQ==",  
-                "video_circuit_id" : "LGF8pf4gkOZcABnNq9NMxNcE/U2Gc0B3trVK0hEzNp7v5Z7ONCJVcILwpbzVuqyOFxz2XIU/rjOerp6NEmjmnQ==",
-                "service_type" : "BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==",
-                "address_id" : 20808267725.0,
-                "vision_account_id" : "ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==",
-                "vision_customer_id" : "0iry578HPx7m50gGovhEuzJ4PyQlDoNd8C+/KmgQuGAoLjtm+W5XITuPgx7f1I9OgZmSvDtv+uMxvd3uJFQvrQ==",
-                "address_type" : "SFU",
-                "line_of_business" : "Residence"
-            }
         }
         ]
     }
+encoded_list = list()
 for i in pipTopologySrc['input']:
     e = EncodeAvro(i)
-    pushToTopic(e, "wireline_churn_test_topic")
-
-and below is the code to consume it from the pubsub:
-import io
-import json
-import traceback
-from google.cloud import pubsub_v1
-import avro.schema
-from avro.io import DatumReader, BinaryDecoder
-from io import BytesIO
-import fastavro
-import csv
-from datetime import datetime
-import io
-import avro.io as avro_io
-import avro.schema
-import base64
-from io import BytesIO
-import time
-import datetime
-def process_avro_to_csv(message_data):
-    raw_schema = """{"namespace": "com.vz.vznet",
-                                           "type": "record",
-                                           "name": "VznetDefault",
-                                           "doc": "Default schema for events in transit",
-                                           "fields": [
-                                           {"name": "timestamp", "type": "long"},
-                                           {"name": "host", "type": "string"},
-                                           {"name": "src",  "type": "string" },
-                                           {"name": "_event_ingress_ts", "type": "long"},
-                                           {"name": "_event_origin", "type": "string"},
-                                           {"name": "_event_tags", "type": {"type": "array", "items": "string"}},
-                                           {"name": "_event_route", "type": "string"},
-                                           {"name": "_event_metrics", "type": ["null", "bytes"], "default": null},
-                                           {"name": "rawdata", "type": "bytes"}
-                                           ]
-                                           }"""
-    parsed_schema = avro.schema.parse(raw_schema)
-    avro_reader: avro_io.DatumReader = avro_io.DatumReader(parsed_schema)
-    decoeBytes = base64.b64decode(message_data.data)
-    avro_message: avro_io.BinaryDecoder = avro_io.BinaryDecoder(BytesIO(decoeBytes))
-    message = avro_reader.read(avro_message)
-    print(message)
-project_id = "vz-it-np-gudv-dev-vzntdo-0"
-subscription_id = "wireline_churn_test_topic-sub"
-subscriber = pubsub_v1.SubscriberClient()
-subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
-streaming_pull_future = subscriber.subscribe(subscription_path, callback=process_avro_to_csv)
-print("Listening for messages on subscription:", subscription_path)
-with subscriber:
-    try:
-        streaming_pull_future.result(timeout=20)
-    except TimeoutError:
-        print("Subscription timed out")
-        streaming_pull_future.cancel()
-        streaming_pull_future.result()
-
-and here is the error:
+    encoded_list.append(e)
+    pushToTopic(encoded_list, "wireline_churn_test_topic")
 
 
-UnicodeDecodeError: 'utf-8' codec can't decode byte 0xb7 in position 3: invalid start byte
-Top-level exception occurred in callback while processing a message
-Traceback (most recent call last):
-  File "/opt/conda/miniconda3/lib/python3.8/site-packages/google/cloud/pubsub_v1/subscriber/_protocol/streaming_pull_manager.py", line 84, in _wrap_callback_errors
-    callback(message)
-  File "/tmp/ipykernel_7073/4290575499.py", line 39, in process_avro_to_csv
-    message = avro_reader.read(avro_message)
-  File "/opt/conda/miniconda3/lib/python3.8/site-packages/avro/io.py", line 644, in read
-    return self.read_data(self.writers_schema, self.readers_schema, decoder)
-  File "/opt/conda/miniconda3/lib/python3.8/site-packages/avro/io.py", line 722, in read_data
-    return self.read_record(writers_schema, readers_schema, decoder)
-  File "/opt/conda/miniconda3/lib/python3.8/site-packages/avro/io.py", line 917, in read_record
-    field_val = self.read_data(field.type, readers_field.type, decoder)
-  File "/opt/conda/miniconda3/lib/python3.8/site-packages/avro/io.py", line 671, in read_data
-    return decoder.read_utf8()
-  File "/opt/conda/miniconda3/lib/python3.8/site-packages/avro/io.py", line 324, in read_utf8
-    return self.read_bytes().decode("utf-8")
-UnicodeDecodeError: 'utf-8' codec can't decode byte 0xb7 in position 3: invalid start byte
-​
 
+futures---------------------------------------------------------------------------
+AttributeError                            Traceback (most recent call last)
+Input In [26], in <cell line: 132>()
+    133 e = EncodeAvro(i)
+    134 encoded_list.append(e)
+--> 135 pushToTopic(encoded_list, "wireline_churn_test_topic")
+
+Input In [26], in pushToTopic(data_rows, topic_name)
+     52     publish_future.add_done_callback(callback)
+     53     publish_.append(publish_future)
+---> 55 futures.wait(publish_futures, return_when=futures.ALL_COMPLETED)
+     57 print(f"Published messages with flow control settings to {topic_path}.")
+
+File /opt/conda/miniconda3/lib/python3.8/concurrent/futures/_base.py:288, in wait(fs, timeout, return_when)
+    264 def wait(fs, timeout=None, return_when=ALL_COMPLETED):
+    265     """Wait for the futures in the given sequence to complete.
+    266 
+    267     Args:
+   (...)
+    286         futures.
+    287     """
+--> 288     with _AcquireFutures(fs):
+    289         done = set(f for f in fs
+    290                    if f._state in [CANCELLED_AND_NOTIFIED, FINISHED])
+    291         not_done = set(fs) - done
+
+File /opt/conda/miniconda3/lib/python3.8/concurrent/futures/_base.py:150, in _AcquireFutures.__enter__(self)
+    148 def __enter__(self):
+    149     for future in self.:
+--> 150         future._condition.acquire()
+
+AttributeError: 'Future' object has no attribute '_condition'futures
