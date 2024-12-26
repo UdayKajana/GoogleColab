@@ -1,83 +1,219 @@
+This is the code to push data to pubsub:
 import json
 import avro.io as avro_io
 import avro.schema
-from google.cloud import pubsub_v1
-from concurrent.futures import TimeoutError
+from io import BytesIO
+from avro.datafile import DataFileReader, DataFileWriter
 import io
 import logging
+import argparse
+from subprocess import getoutput
 
-def decode_avro(avro_bytes: bytes) -> dict:
-    """
-    Decode Avro binary data back into a Python dictionary.
-    """
-    schema = """{"namespace": "com.vz.vznet",
-                "type": "record",
-                "name": "VznetDefault",
-                "doc": "Default schema for events in transit",
-                "fields": [
-                    {"name": "timestamp", "type": "long"},
-                    {"name": "host", "type": "string"},
-                    {"name": "src",  "type": "string" },
-                    {"name": "_event_ingress_ts", "type": "long"},
-                    {"name": "_event_origin", "type": "string"},
-                    {"name": "_event_tags", "type": "array", "items": "string"},
-                    {"name": "_event_route", "type": "string"},
-                    {"name": "_event_metrics", "type": ["null", "bytes"], "default": null},
-                    {"name": "rawdata", "type": "bytes"}
-                ]
-            }"""
-    
-    parsed_schema = avro.schema.parse(schema)
-    bytes_reader = io.BytesIO(avro_bytes)
-    decoder = avro_io.BinaryDecoder(bytes_reader)
-    datum_reader = avro_io.DatumReader(parsed_schema)
-    
-    result = datum_reader.read(decoder)
-    
-    # Convert rawdata bytes back to dict
-    if result.get('rawdata'):
-        result['rawdata'] = json.loads(result['rawdata'].decode('utf-8'))
-        
-    return result
+def pushToTopic(data_rows, topic_name):
+    from concurrent import futures
+    from google.cloud import pubsub_v1
+    from google.cloud.pubsub_v1.types import (
+        LimitExceededBehavior,
+        PublisherOptions,
+        PublishFlowControl,
+    )
 
-def receive_messages(project_id: str, subscription_id: str, timeout: float = None):
-    """
-    Receives messages from a Pub/Sub subscription and decodes the Avro payload.
-    """
-    subscriber = pubsub_v1.SubscriberClient()
-    subscription_path = subscriber.subscription_path(project_id, subscription_id)
-    
-    def callback(message: pubsub_v1.subscriber.message.Message) -> None:
-        try:
-            decoded_data = decode_avro(message.data)
-            print(f"Received message:")
-            print(f"Data: {json.dumps(decoded_data, indent=2)}")
-            # Acknowledge the message
-            message.ack()
-            
-        except Exception as e:
-            print(f"Error processing message: {e}")
-            # Nack the message in case of processing error
-            message.nack()
+    # TODO(developer)
+    project_id = "vz-it-np-gudv-dev-vzntdo-0"
+    topic_id = topic_name  # "dflow_test"
 
-    streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
-    print(f"Listening for messages on {subscription_path}")
+    # Configure how many messages the publisher client can hold in memory
+    # and what to do when messages exceed the limit.
+    publisher = pubsub_v1.PublisherClient()
 
+    topic_path = publisher.topic_path(project_id, topic_id)
+
+    publish_futures = []
+
+    # Resolve the publish future in a separate thread.
+    def callback(publish_future: pubsub_v1.publisher.futures.Future) -> None:
+        message_id = publish_future.result()
+        # print(message_id)
+    publish_future = publisher.publish(topic_path, data_rows)
+    print(publish_future)
+    # future.result(timeout=10)
+    # Non-blocking. Allow the publisher client to batch messages.
+    publish_future.add_done_callback(callback)
+    publish_futures.append(publish_future)
+    print(f"Published messages with flow control settings to {topic_path}.")
+
+def EncodeAvro(element):
+    def encode(data: dict) -> bytes:
+        schema = """{"namespace": "com.vz.vznet",
+                                                               "type": "record",
+                                                               "name": "VznetDefault",
+                                                               "doc": "Default schema for events in transit",
+                                                               "fields": [
+                                                               {"name": "timestamp", "type": "long"},
+                                                               {"name": "host", "type": "string"},
+                                                               {"name": "src",  "type": "string" },
+                                                               {"name": "_event_ingress_ts", "type": "long"},
+                                                               {"name": "_event_origin", "type": "string"},
+                                                               {"name": "_event_tags", "type": {"type": "array", "items": "string"}},
+                                                               {"name": "_event_route", "type": "string"},
+                                                               {"name": "_event_metrics", "type": ["null", "bytes"], "default": null},
+                                                               {"name": "rawdata", "type": "bytes"}
+                                                               ]
+                                                               }"""
+        if isinstance(schema, dict):
+            schema = json.dumps(schema)
+        if isinstance(data, str):
+            data = json.loads(data)
+        schema: str = avro.schema.parse(schema)
+        val = data
+        # dataFile = open(file, "wb")
+        # val[DefaultValues.EVENT_METRICS] = bytes(str(val.get(DefaultValues.EVENT_METRICS)), 'utf-8')
+        datum_writer: avro_io.DatumWriter = avro_io.DatumWriter(schema)
+        bytes_writer: io.BytesIO = io.BytesIO()
+        encoder: avro_io.BinaryEncoder = avro_io.BinaryEncoder(bytes_writer)
+        datum_writer.write(val, encoder)
+        raw_bytes: bytes = bytes_writer.getvalue()
+        return raw_bytes
+
+    raw_data = element['rawdata']
+    final_dict = {}
+    final_dict['timestamp'] = element['timestamp']
+    final_dict['src'] = element['src']
+    final_dict['host'] = element['host']
+    final_dict['_event_ingress_ts'] = element['ingressTimestamp']
+    final_dict['_event_origin'] = '|'.join(element['origins'])
+    final_dict["rawdata"] = json.dumps(raw_data)
+    final_dict['_event_tags'] = element['tags']
+    final_dict['_event_route'] = str(element['route'])
+    final_dict['_event_metrics'] = None
+    final_dict["rawdata"] = bytes(json.dumps(raw_data), 'utf-8')
+    return encode(final_dict)
+
+pipTopologySrc = {
+    "input": [
+        {"src": "vz.pip.eclipse.stat.if_stats.proc.v0", 
+         "timestamp": 1563152004139, 
+         "host": "TEST-1234-XYZ",
+         "ingressTimestamp": 1563153004139, 
+         "fetchTimestamp": 1563153008139, 
+         "origins": ["vmb,kafka,ENMV.PIP.IP"],
+         "tags": [], 
+         "route": 3,
+         "rawdata": {
+             "ont_activation_date": "2019-08-28 04:00:00.000000 UTC",
+             "data_circuit_id" : "A6o6LHciNWfMMDXRAk/AmzSqPzZU3lHpzvpeWb0487+2CKWc6iSMbMf+z7sLju0UiEj/jLnGDmcLlU5t5llkug==",
+             "circuit_id" : "Nm9qk2Q0DT7NDTmDNtHpHM9+z2ezUL+wyqO/vMiaCX2uuZJ8kdj/1sg2+bc+Mc9yIh+w4fjnjjdcwdVFGaGbvw==",
+             "video_circuit_id" : "Nm9qk2Q0DT7NDTmDNtHpHM9+z2ezUL+wyqO/vMiaCX2uuZJ8kdj/1sg2+bc+Mc9yIh+w4fjnjjdcwdVFGaGbvw==",
+             "service_type" : "BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==",
+             "address_id" : 17935568585.0,
+             "vision_account_id" : "ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==",
+             "vision_customer_id" : "Tz1bRQ1Md58vddT9EfHmU3LvXtmlDB4CDpLWNFRmI7wg4gFO9lSIEbNXNQAJiVqZIU2/dcdEjaZLlGHhFD4H0g==",
+             "address_type" : "SFU",
+             "line_of_business" : "Residence"
+         }
+        },
+        {"src": "vz.pip.eclipse.stat.if_stats.proc.v0", 
+         "timestamp": 1563152004139, 
+         "host": "TEST-1234-XYZ",
+         "ingressTimestamp": 1563153004139, 
+         "fetchTimestamp": 1563153008139, 
+         "origins": ["vmb,kafka,ENMV.PIP.IP"],
+         "tags": [], 
+         "route": 3,
+         "rawdata": {
+                "ont_activation_date": "2022-12-02 05:00:00.000000 UTC",
+                "data_circuit_id" : "IbO+zFtdYczFOgBHOkiNNINdZtJpvQClHr6diOckccWWcteRkgJaxL25j3K1OjH9dbrLAUWR2Jd1kDoN44TJug==",
+                "circuit_id" : "LGF8pf4gkOZcABnNq9NMxNcE/U2Gc0B3trVK0hEzNp7v5Z7ONCJVcILwpbzVuqyOFxz2XIU/rjOerp6NEmjmnQ==",  
+                "video_circuit_id" : "LGF8pf4gkOZcABnNq9NMxNcE/U2Gc0B3trVK0hEzNp7v5Z7ONCJVcILwpbzVuqyOFxz2XIU/rjOerp6NEmjmnQ==",
+                "service_type" : "BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==",
+                "address_id" : 20808267725.0,
+                "vision_account_id" : "ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==",
+                "vision_customer_id" : "0iry578HPx7m50gGovhEuzJ4PyQlDoNd8C+/KmgQuGAoLjtm+W5XITuPgx7f1I9OgZmSvDtv+uMxvd3uJFQvrQ==",
+                "address_type" : "SFU",
+                "line_of_business" : "Residence"
+            }
+        }
+        ]
+    }
+for i in pipTopologySrc['input']:
+    e = EncodeAvro(i)
+    pushToTopic(e, "wireline_churn_test_topic")
+
+and below is the code to consume it from the pubsub:
+import io
+import json
+import traceback
+from google.cloud import pubsub_v1
+import avro.schema
+from avro.io import DatumReader, BinaryDecoder
+from io import BytesIO
+import fastavro
+import csv
+from datetime import datetime
+import io
+import avro.io as avro_io
+import avro.schema
+import base64
+from io import BytesIO
+import time
+import datetime
+def process_avro_to_csv(message_data):
+    raw_schema = """{"namespace": "com.vz.vznet",
+                                           "type": "record",
+                                           "name": "VznetDefault",
+                                           "doc": "Default schema for events in transit",
+                                           "fields": [
+                                           {"name": "timestamp", "type": "long"},
+                                           {"name": "host", "type": "string"},
+                                           {"name": "src",  "type": "string" },
+                                           {"name": "_event_ingress_ts", "type": "long"},
+                                           {"name": "_event_origin", "type": "string"},
+                                           {"name": "_event_tags", "type": {"type": "array", "items": "string"}},
+                                           {"name": "_event_route", "type": "string"},
+                                           {"name": "_event_metrics", "type": ["null", "bytes"], "default": null},
+                                           {"name": "rawdata", "type": "bytes"}
+                                           ]
+                                           }"""
+    parsed_schema = avro.schema.parse(raw_schema)
+    avro_reader: avro_io.DatumReader = avro_io.DatumReader(parsed_schema)
+    decoeBytes = base64.b64decode(message_data.data)
+    avro_message: avro_io.BinaryDecoder = avro_io.BinaryDecoder(BytesIO(decoeBytes))
+    message = avro_reader.read(avro_message)
+    print(message)
+project_id = "vz-it-np-gudv-dev-vzntdo-0"
+subscription_id = "wireline_churn_test_topic-sub"
+subscriber = pubsub_v1.SubscriberClient()
+subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
+streaming_pull_future = subscriber.subscribe(subscription_path, callback=process_avro_to_csv)
+print("Listening for messages on subscription:", subscription_path)
+with subscriber:
     try:
-        streaming_pull_future.result(timeout=timeout)
+        streaming_pull_future.result(timeout=20)
     except TimeoutError:
-        streaming_pull_future.cancel()  # Trigger the shutdown
-        streaming_pull_future.result()  # Block until the shutdown is complete
-    finally:
-        subscriber.close()
+        print("Subscription timed out")
+        streaming_pull_future.cancel()
+        streaming_pull_future.result()
 
-if __name__ == "__main__":
-    # Example usage
-    PROJECT_ID = "vz-it-np-gudv-dev-vzntdo-0"
-    SUBSCRIPTION_ID = "wireline_churn_test_sub"  # Replace with your subscription ID
-    
-    try:
-        # Start receiving messages
-        receive_messages(PROJECT_ID, SUBSCRIPTION_ID, timeout=30)  # Listen for 30 seconds
-    except KeyboardInterrupt:
-        print("Stopping message reception...")
+and here is the error:
+
+
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0xb7 in position 3: invalid start byte
+Top-level exception occurred in callback while processing a message
+Traceback (most recent call last):
+  File "/opt/conda/miniconda3/lib/python3.8/site-packages/google/cloud/pubsub_v1/subscriber/_protocol/streaming_pull_manager.py", line 84, in _wrap_callback_errors
+    callback(message)
+  File "/tmp/ipykernel_7073/4290575499.py", line 39, in process_avro_to_csv
+    message = avro_reader.read(avro_message)
+  File "/opt/conda/miniconda3/lib/python3.8/site-packages/avro/io.py", line 644, in read
+    return self.read_data(self.writers_schema, self.readers_schema, decoder)
+  File "/opt/conda/miniconda3/lib/python3.8/site-packages/avro/io.py", line 722, in read_data
+    return self.read_record(writers_schema, readers_schema, decoder)
+  File "/opt/conda/miniconda3/lib/python3.8/site-packages/avro/io.py", line 917, in read_record
+    field_val = self.read_data(field.type, readers_field.type, decoder)
+  File "/opt/conda/miniconda3/lib/python3.8/site-packages/avro/io.py", line 671, in read_data
+    return decoder.read_utf8()
+  File "/opt/conda/miniconda3/lib/python3.8/site-packages/avro/io.py", line 324, in read_utf8
+    return self.read_bytes().decode("utf-8")
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0xb7 in position 3: invalid start byte
+​
+
