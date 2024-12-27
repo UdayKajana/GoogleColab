@@ -1,10 +1,48 @@
-# Use Dataflow's Python Flex Template base image
-FROM gcr.io/dataflow-templates-base/python3-template-launcher
+#!/usr/bin/env python3
+import argparse
+import logging
+import subprocess
+import sys
+
+def main():
+    # Set up argument parser for Flex Template parameters
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--query', required=True, help='BigQuery SQL query to execute')
+    parser.add_argument('--project', required=True, help='GCP Project ID')
+    args, pipeline_args = parser.parse_known_args()
+
+    # Log received arguments
+    logging.basicConfig(level=logging.INFO)
+    logging.info(f"Launcher received arguments: query={args.query}, project={args.project}")
+
+    # Run the pipeline script with the received arguments
+    pipeline_command = [
+        "python",
+        "/app/pipeline.py",  # Path to your pipeline script
+        f"--query={args.query}",
+        f"--project={args.project}"
+    ] + pipeline_args
+
+    # Execute the pipeline
+    logging.info(f"Executing pipeline with command: {' '.join(pipeline_command)}")
+    result = subprocess.run(pipeline_command, check=True)
+    logging.info(f"Pipeline finished with return code: {result.returncode}")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        logging.error(f"Error in launcher: {e}")
+        sys.exit(1)
+
+
+# Use Apache Beam Python SDK image or a standard Python image
+FROM apache/beam_python3.9_sdk:2.48.0
 
 # Set working directory
 WORKDIR /app
 
-# Install additional dependencies if required
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
     libffi-dev \
@@ -12,36 +50,14 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements file and install dependencies
+# Copy requirements file and install Python dependencies
 COPY requirements.txt /app/requirements.txt
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy pipeline code
+# Copy pipeline code and launcher script
 COPY dfpipeline.py /app/pipeline.py
+COPY python_template_launcher.py /app/python_template_launcher.py
 
-# Set the entry point for the Dataflow launcher
-ENTRYPOINT ["/opt/google/dataflow/python_template_launcher"]
-
-
-gcloud dataflow flex-template build \
-gs://vznet-test/wireline_churn_test/src/template.json \
---image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 \
---sdk-language "PYTHON" \
---metadata-file /home/udayka/workspace/metadata.json
-
-
-
-gcloud dataflow flex-template run bigquery123 \
---template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
---region us-east4 \
---parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10",project="vz-it-np-gudv-dev-vzntdo-0" \
---temp-location=gs://vznet-test/wireline_churn_test/tmp/ \
---num-workers 2 \
---max-workers 2 \
---worker-machine-type n2-standard-2 \
---disable-public-ips \
---network=shared-np-east \
---dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
---subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
---service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com
+# Set launcher as the entry point
+ENTRYPOINT ["python", "/app/python_template_launcher.py"]
