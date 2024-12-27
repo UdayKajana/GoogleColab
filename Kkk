@@ -1,10 +1,7 @@
-# Use Apache Beam's official Python SDK image
 FROM apache/beam_python3.9_sdk:2.48.0
 
-# Set working directory
 WORKDIR /workspace
 
-# Install additional system dependencies if needed
 RUN apt-get update && apt-get install -y \
     build-essential \
     libffi-dev \
@@ -12,32 +9,22 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# Copy requirements file
 COPY requirements.txt /workspace/requirements.txt
 
-# Install Python dependencies
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r /workspace/requirements.txt
 
-# Copy pipeline code
 COPY dfpipeline.py /workspace/pipeline.py
 
-# Set permissions
 RUN chown -R appuser:appuser /workspace && \
     mkdir -p /home/appuser/.local && \
     chown -R appuser:appuser /home/appuser
 
-# Switch to non-root user
 USER appuser
 
-# Set Python path to include user site-packages
 ENV PYTHONPATH=/home/appuser/.local/lib/python3.9/site-packages:$PYTHONPATH
 
-# Use the launcher that comes with the Apache Beam SDK image
-ENTRYPOINT ["python", "/workspace/pipeline.py"]
-
-
-docker: Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: exec: "/opt/google/dataflow/python_template_launcher": stat /opt/google/dataflow/python_template_launcher: no such file or directory: unknown.
+# Use the Dataflow launcher
+ENTRYPOINT ["/opt/apache/beam/boot"]
