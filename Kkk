@@ -1,21 +1,16 @@
-# Start with Python 3.9 slim base image
-FROM python:3.9-slim
+# Use Apache Beam's official Python SDK image
+FROM apache/beam_python3.9_sdk:2.48.0
 
-# Install system dependencies
+# Set working directory
+WORKDIR /workspace
+
+# Install additional system dependencies if needed
 RUN apt-get update && apt-get install -y \
     build-essential \
     libffi-dev \
     libssl-dev \
-    wget \
-    curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Apache Beam SDK
-RUN pip install apache-beam[gcp]==2.48.0
-
-# Set working directory
-WORKDIR /workspace
 
 # Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser
@@ -25,22 +20,15 @@ COPY requirements.txt /workspace/requirements.txt
 
 # Install Python dependencies
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r /workspace/requirements.txt --user
-
-# Create directory structure and download launcher using curl with retry
-RUN mkdir -p /opt/google/dataflow && \
-    curl -L --retry 3 --retry-delay 5 \
-    https://storage.googleapis.com/dataflow-flex-templates/python/launcher/python_template_launcher \
-    -o /opt/google/dataflow/python_template_launcher && \
-    chmod +x /opt/google/dataflow/python_template_launcher
+    pip install --no-cache-dir -r /workspace/requirements.txt
 
 # Copy pipeline code
 COPY dfpipeline.py /workspace/pipeline.py
 
 # Set permissions
-RUN chown -R appuser:appuser /workspace \
-    && chown -R appuser:appuser /opt/google/dataflow \
-    && mkdir -p /home/appuser/.local && chown -R appuser:appuser /home/appuser
+RUN chown -R appuser:appuser /workspace && \
+    mkdir -p /home/appuser/.local && \
+    chown -R appuser:appuser /home/appuser
 
 # Switch to non-root user
 USER appuser
@@ -48,26 +36,5 @@ USER appuser
 # Set Python path to include user site-packages
 ENV PYTHONPATH=/home/appuser/.local/lib/python3.9/site-packages:$PYTHONPATH
 
-ENTRYPOINT ["/opt/google/dataflow/python_template_launcher"]
-
-
-
-
-2024-12-27 18:16:23.350 IST
-Adding config for all GCR and AR registries.
-2024-12-27 18:16:23.351 IST
-/home/cloudservice/.docker/config.json configured to use this credential helper for GCR and AR registries
-2024-12-27 18:16:23.407 IST
-5909a03a956bbc85dd45fee1705422549d7aa597395b70b6cb53edb7316ae077
-2024-12-27 18:16:23.537 IST
-Credentials not provided. Not logging into Docker private registry.
-2024-12-27 18:16:23.540 IST
-Started cloudservice.service.
-2024-12-27 18:16:24.315 IST
-exec /opt/google/dataflow/python_template_launcher: exec format error
-2024-12-27 18:16:24.316 IST
-cloudservice.service: Main process exited, code=exited, status=1/FAILURE
-2024-12-27 18:16:24.650 IST
-cloudservice.service: Failed with result 'exit-code'.
-
-
+# Use the launcher that comes with the Apache Beam SDK image
+ENTRYPOINT ["python", "/workspace/pipeline.py"]
