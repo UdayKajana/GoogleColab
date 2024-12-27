@@ -23,6 +23,7 @@ def parse_args():
     parser.add_argument('--temp_location', required=True, help='Temp GCS bucket path')
     parser.add_argument('--template_location', required=True, help='GCS bucket path to save template')
     parser.add_argument('--input_sub', required=True, help='Input Subscription')
+    parser.add_argument('--setup_file', required=True, help='setupfile')
     return parser.parse_known_args()
 
 class DecodeDoFn(beam.DoFn):
@@ -45,6 +46,11 @@ class DecodeDoFn(beam.DoFn):
     }
 
     def process(self, element):
+        import fastavro
+        import argparse
+        import logging
+        import datetime
+        from io import BytesIO
         try:
             bytes_reader = BytesIO(element)
             avro_reader = fastavro.reader(bytes_reader, self.SCHEMA)
@@ -72,6 +78,8 @@ class DecodeDoFn(beam.DoFn):
             logging.error(f'Error deserializing the records: {e}')
 
 def process_avro_to_csv(message_data):
+    import fastavro
+    import logging
     try:
         bytes_reader = BytesIO(message_data)
         avro_reader = fastavro.reader(bytes_reader)
@@ -124,7 +132,8 @@ def run_pipeline():
         'region': known_args.region,
         'staging_location': known_args.staging_location,
         'temp_location': known_args.temp_location,
-        'template_location': known_args.template_location
+        'template_location': known_args.template_location,
+	'setup_file': known_args.setup_file
     }
     
     pipeline_options = PipelineOptions.from_dictionary(options)
@@ -139,3 +148,89 @@ def run_pipeline():
 
 if __name__ == "__main__":
     run_pipeline()
+
+
+
+
+import setuptools
+
+setuptools.setup(
+  name='dim_inventory_customer_profiles_norm_v0',
+  version='0.1',
+  install_requires=[],
+  packages=setuptools.find_packages(),
+)
+
+
+python3 /home/udayka/workspace1/dim_inventory_customer_profiles_norm_v0.py --project vz-it-np-gudv-dev-vzntdo-0 --runner DataflowRunner --requirements_file=/home/udayka/workspace1/requirements.txt --region us-east4 --staging_location gs://vznet-test/wireline_churn_bq_spanner/stg --temp_location gs://vznet-test/wireline_churn_test/tmp/ --template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv --input_sub wireline_churn_test_topic-sub --setup_file /vzwhome/udayka/workspace1/setup.py
+/apps/opt/application/vznet/pyvenv39/bin/python3: No module named build
+warning: sdist: standard file not found: should have one of README, README.rst, README.txt, README.md
+
+warning: check: missing required meta-data: url
+
+warning: check: missing meta-data: either (author and author_email) or (maintainer and maintainer_email) should be supplied
+
+Generating new OAuth credentials ...
+
+Your browser has been opened to visit:
+
+    https://accounts.google.com/o/oauth2/v2/auth?client_id=1042881264118.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A8080%2F&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcompute+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcompute.readonly+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&access_type=offline&response_type=code
+
+If your browser is on a different machine then exit and re-run this
+application with the command-line parameter
+
+  --noauth_local_webserver
+
+^V^CTraceback (most recent call last):
+  File "/home/udayka/workspace1/dim_inventory_customer_profiles_norm_v0.py", line 150, in <module>
+    run_pipeline()
+  File "/home/udayka/workspace1/dim_inventory_customer_profiles_norm_v0.py", line 143, in run_pipeline
+    pubsub_data = (p
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 613, in __exit__
+    self.result = self.run()
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 560, in run
+    return Pipeline.from_runner_api(
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 587, in run
+    return self.runner.run_pipeline(self, self._options)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/dataflow/dataflow_runner.py", line 494, in run_pipeline
+    self.dataflow_client = apiclient.DataflowApplicationClient(
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/dataflow/internal/apiclient.py", line 502, in __init__
+    self._client = dataflow.DataflowV1b3(
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/dataflow/internal/clients/dataflow/dataflow_v1b3_client.py", line 47, in __init__
+    super(DataflowV1b3, self).__init__(
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apitools/base/py/base_api.py", line 261, in __init__
+    self._SetCredentials(**credentials_args)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apitools/base/py/base_api.py", line 309, in _SetCredentials
+    self._credentials = credentials_lib.GetCredentials(**args)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apitools/base/py/credentials_lib.py", line 153, in GetCredentials
+    credentials = CredentialsFromFile(credentials_filename, client_info,
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apitools/base/py/credentials_lib.py", line 560, in CredentialsFromFile
+    credentials = tools.run_flow(flow, credential_store, flags)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/oauth2client/_helpers.py", line 133, in positional_wrapper
+    return wrapped(*args, **kwargs)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/oauth2client/tools.py", line 230, in run_flow
+    httpd.handle_request()
+  File "/usr/lib64/python3.9/socketserver.py", line 294, in handle_request
+    ready = selector.select(timeout)
+  File "/usr/lib64/python3.9/selectors.py", line 416, in select
+    fd_event_list = self._selector.poll(timeout)
+KeyboardInterrupt
+
+(pyvenv39) [udayka@tpaldgudva001 workspace1]$ ^C
+(pyvenv39) [udayka@tpaldgudva001 workspace1]$ ^C
+(pyvenv39) [udayka@tpaldgudva001 workspace1]$ python3 /home/udayka/workspace1/dim_inventory_customer_profiles_norm_v0.py --project vz-it-np-gudv-dev-vzntdo-0 --runner DataflowRunner --requirements_file=/home/udayka/workspace1/requirements.txt --region us-east4 --staging_location gs://vznet-test/wireline_churn_bq_spanner/stg --temp_location gs://vznet-test/wireline_churn_test/tmp/ --template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv --input_sub wireline_churn_test_topic-sub --setup_file /vzwhome/udayka/workspace1/setup.py ^C
+(pyvenv39) [udayka@tpaldgudva001 workspace1]$ --noauth_local_webserver
+^C
+(pyvenv39) [udayka@tpaldgudva001 workspace1]$ python3 /home/udayka/workspace1/dim_inventory_customer_profiles_norm_v0.py --project vz-it-np-gudv-dev-vzntdo-0 --runner DataflowRunner --requirements_file=/home/udayka/workspace1/requirements.txt --region us-east4 --staging_location gs://vznet-test/wireline_churn_bq_spanner/stg --temp_location gs://vznet-test/wireline_churn_test/tmp/ --template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv --input_sub wireline_churn_test_topic-sub --setup_file /vzwhome/udayka/workspace1/setup.py --noauth_local_webserver
+/apps/opt/application/vznet/pyvenv39/bin/python3: No module named build
+warning: sdist: standard file not found: should have one of README, README.rst, README.txt, README.md
+
+warning: check: missing required meta-data: url
+
+warning: check: missing meta-data: either (author and author_email) or (maintainer and maintainer_email) should be supplied
+
+Generating new OAuth credentials ...
+
+Go to the following link in your browser:
+
+    https://accounts.google.com/o/oauth2/v2/auth?client_id=1042881264118.apps.googleusercontent.com&redirect_uri=urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcompute+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcompute.readonly+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&access_type=offline&response_type=code
