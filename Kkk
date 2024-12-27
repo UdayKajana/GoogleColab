@@ -1,135 +1,192 @@
-import json
-import fastavro
-from io import BytesIO
-import logging
-import argparse
-from google.cloud import pubsub_v1
-from concurrent import futures
-import datetime
-from typing import Dict, Any
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.io.gcp.pubsub import ReadFromPubSub
+from apache_beam.options.pipeline_options import StandardOptions
 
-SCHEMA = {
-    "namespace": "com.vz.vznet",
-    "type": "record",
-    "name": "VznetDefault",
-    "doc": "Default schema for events in transit",
-    "fields": [
-        {"name": "timestamp", "type": "long"},
-        {"name": "host", "type": "string"},
-        {"name": "src", "type": "string"},
-        {"name": "_event_ingress_ts", "type": "long"},
-        {"name": "_event_origin", "type": "string"},
-        {"name": "_event_tags", "type": {"type": "array", "items": "string"}},
-        {"name": "_event_route", "type": "string"},
-        {"name": "_event_metrics", "type": ["null", "bytes"], "default": None},
-        {"name": "rawdata", "type": "bytes"}
-    ]
+import argparse
+import logging
+logging.getLogger().setLevel(logging.ERROR)
+class TemplateOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_value_provider_argument('--params', type=str)
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
+parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
+parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
+parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
+parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
+parser.add_argument('--template_location', dest='template_location', required=True,help='GCS bucket path to save template')
+parser.add_argument('--input_sub', dest='input_sub', required=True, help='Input Subscription')
+parser.add_argument('--sdk_container_image', dest='sdk_container_image',
+                    default='us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/beamredis:1.0.0',
+                    required=False, help='sdk_container_image location')
+parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Input Subscription')
+known_args,beam_args = parser.parse_known_args()
+
+def process_avro_to_csv(message_data):
+    logging.log(logging.INFO, str(message_data))
+    from io import BytesIO
+    import io
+    import fastavro
+    import csv
+    import uuid
+    try:
+        logging.log(logging.INFO, str(BytesIO))
+        # Read Avro data
+        bytes_reader = BytesIO(message_data)
+        avro_reader = fastavro.reader(bytes_reader)
+
+        # Extract records
+        records = [record for record in avro_reader]
+        if not records:
+            logging.warning("No records found in the Avro message.")
+            return None
+
+        # Convert records to CSV format
+        fieldnames = list(records[0].keys())
+        csv_buffer = io.StringIO()
+        writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(records)
+
+        # Generate a unique filename
+        unique_id = uuid.uuid4()
+        filename = f"message_{unique_id}.csv"
+
+        logging.info(f"Processed message into file: {filename}")
+        return filename, csv_buffer.getvalue()
+    except Exception as e:
+        logging.error(f"Error processing Avro message: {e}")
+        return None
+
+def write_csv_to_gcs(element, gcs_location):
+    
+    from apache_beam.io.gcp.gcsio import GcsIO
+    try:
+        filename, csv_data = element
+        if not csv_data:
+            logging.warning(f"No CSV data to write for {filename}. Skipping.")
+            return
+        # Define GCS file path
+        gcs_path = f"{gcs_location}/{filename}"
+        logging.log(logging.INFO, gcs_path)
+        # Write CSV data to GCS
+        gcs_io = GcsIO()
+        with gcs_io.open(gcs_path, 'w') as gcs_file:
+            gcs_file.write(csv_data.encode("utf-8"))
+
+        logging.info(f"Successfully wrote {filename} to GCS: {gcs_path}")
+    except Exception as e:
+        logging.error(f"Error writing CSV to GCS: {e}")
+
+def parse_avro_message(message):
+    from io import BytesIO
+    from datetime import datetime
+    import fastavro
+    table_columns = ["telephone_number",
+"trouble_report_num",
+"address_id",
+"chronic_flag",
+"chronic_total",
+"line_id_trimmed",
+"port_associated_service",
+"date_opened",
+"data_circuit_id",
+"video_circuit_id"]
+    try:
+        # Read Avro data
+        bytes_reader = BytesIO(message)
+        avro_reader = fastavro.reader(bytes_reader)
+        rows = []
+        for record in avro_reader:
+            spanner_row = {column: record.get(column, None) for column in table_columns}
+            rows.append(spanner_row)
+        return rows
+    except Exception as e:
+        logging.error(f"Error parsing Avro message: {e}")
+        return []
+
+options = {
+    'project': known_args.project,
+    'runner': known_args.runner,
+    'region': known_args.region,
+    'staging_location': known_args.staging_location,
+    'temp_location': known_args.temp_location,
+    'template_location': known_args.template_location,
+    'save_main_session': True,
+    'streaming': True,
+    'sdk_container_image': known_args.sdk_container_image,
+    'sdk_location': 'container'
 }
 
-def push_to_topic(data_rows: bytes, topic_name: str) -> None:
-    project_id = "vz-it-np-gudv-dev-vzntdo-0"
-    publisher = pubsub_v1.PublisherClient()
-    topic_path = publisher.topic_path(project_id, topic_name)
-    
-    def callback(publish_future: pubsub_v1.publisher.futures.Future) -> None:
-        message_id = publish_future.result()
-        print(f"Published message {message_id}")
-    
-    publish_future = publisher.publish(topic_path, data_rows)
-    publish_future.add_done_callback(callback)
-    print(f"Published message to {topic_path}")
+pipeline_options = PipelineOptions.from_dictionary(options)
+p = beam.Pipeline(options=pipeline_options)
+pubsub_data=(p|f'ReadFromPubsub {known_args.input_sub}' >> ReadFromPubSub( subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}")
+            |'Decode Msg' >> beam.Map(lambda x: x.decode('utf-8'))
+            )
+print_data = pubsub_data | "PrintData" >> beam.Map(lambda element : logging.info(logging.INFO,  str(element)))
+# csv_files = (pubsub_data | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv))
+# _ = (csv_files | "WriteCSVToGCS" >> beam.Map(write_csv_to_gcs,known_args.gcs_folder_path))
 
-def encode_avro(element: Dict[str, Any]) -> bytes:
-    final_dict = {
-        'timestamp': element['timestamp'],
-        'src': element['src'],
-        'host': element['host'],
-        '_event_ingress_ts': element['ingressTimestamp'],
-        '_event_origin': '|'.join(element['origins']),
-        '_event_tags': element['tags'],
-        '_event_route': str(element['route']),
-        '_event_metrics': None,
-        'rawdata': bytes(json.dumps(element['rawdata']), 'utf-8')
-    }
-    
-    bytes_writer = BytesIO()
-    fastavro.writer(bytes_writer, SCHEMA, [final_dict])
-    return bytes_writer.getvalue()
+p.run()
+print(f'Created template at {known_args.template_location}.')
 
-def process_avro_message(message: pubsub_v1.subscriber.message.Message) -> None:
-    try:
-        bytes_reader = BytesIO(message.data)
-        avro_reader = fastavro.reader(bytes_reader)
-        record = next(avro_reader)
-        
-        # Decode bytes fields
-        record['rawdata'] = record['rawdata'].decode("utf-8")
-        if record['_event_metrics'] is not None:
-            record['_event_metrics'] = record['_event_metrics'].decode("utf-8")
-        
-        reformatted = {
-            'timestamp': record['timestamp'],
-            'host': record['host'],
-            'src': record['src'],
-            'ingressTimestamp': record['_event_ingress_ts'],
-            'origins': [record['_event_origin']],
-            'tags': record['_event_tags'],
-            'route': 3,
-            'fetchTimestamp': datetime.datetime.now(),
-            'rawdata': record['rawdata']
-        }
-        
-        print(f"Processed message: {reformatted}")
-        message.ack()
-        
-    except Exception as e:
-        print(f'Error processing message: {e}')
-        message.nack()
+command to create template: python3 /home/udayka/workspace1/dim_inventory_customer_profiles_norm_v0.py \
+--project vz-it-np-gudv-dev-vzntdo-0 \
+--runner DataflowRunner \
+--requirements_file=/home/udayka/workspace1/requirements.txt \
+--region us-east4 \
+--staging_location gs://vznet-test/wireline_churn_bq_spanner/stg \
+--temp_location gs://vznet-test/wireline_churn_test/tmp/ \
+--template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv \
+--input_sub wireline_churn_test_topic-sub \
+--gcs_folder_path gs://--gcs_folder_path \
+--sdk_container_image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/beamredis:1.0.0
 
-def subscribe_to_topic() -> None:
-    project_id = "vz-it-np-gudv-dev-vzntdo-0"
-    subscription_id = "wireline_churn_test_topic-sub"
-    
-    subscriber = pubsub_v1.SubscriberClient()
-    subscription_path = subscriber.subscription_path(project_id, subscription_id)
-    
-    streaming_pull_future = subscriber.subscribe(subscription_path, callback=process_avro_message)
-    print(f"Listening for messages on {subscription_path}")
-    
-    with subscriber:
-        try:
-            streaming_pull_future.result(timeout=20)
-        except TimeoutError:
-            streaming_pull_future.cancel()
-            streaming_pull_future.result()
+command to trigger the temlate:
+gcloud dataflow jobs run dim_inventory_customer_profiles_norm_12f3 \
+--gcs-location  gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv \
+--region us-east4 \
+--num-workers 2 \
+--max-workers 2 \
+--worker-machine-type n2-standard-2 \
+--disable-public-ips \
+--network=shared-np-east \
+--dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
+--subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
+--service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com
 
-# Sample usage
-if __name__ == "__main__":
-    # Sample data from original code
-    sample_data = {
-        "input": [
-            {
-                "src": "vz.pip.eclipse.stat.if_stats.proc.v0",
-                "timestamp": 1563152004139,
-                "host": "TEST-1234-XYZ",
-                "ingressTimestamp": 1563153004139,
-                "fetchTimestamp": 1563153008139,
-                "origins": ["vmb,kafka,ENMV.PIP.IP"],
-                "tags": [],
-                "route": 3,
-                "rawdata": {
-                    "ont_activation_date": "2019-08-28 04:00:00.000000 UTC",
-                    "data_circuit_id": "A6o6LHciNWfMMDXRAk/AmzSqPzZU3lHpzvpeWb0487+2CKWc6iSMbMf+z7sLju0UiEj/jLnGDmcLlU5t5llkug==",
-                    # ... rest of the rawdata fields
-                }
-            }
-        ]
-    }
-    
-    # Publisher example
-    for record in sample_data['input']:
-        encoded_data = encode_avro(record)
-        push_to_topic(encoded_data, "wireline_churn_test_topic")
-    
-    # Subscriber example
-    subscribe_to_topic()
+error I am getting: Could not load main session: Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/apache_beam/runners/worker/sdk_worker_main.py", line 116, in create_harness
+    _load_main_session(semi_persistent_directory)
+  File "/usr/local/lib/python3.7/site-packages/apache_beam/runners/worker/sdk_worker_main.py", line 332, in _load_main_session
+    pickler.load_session(session_file)
+  File "/usr/local/lib/python3.7/site-packages/apache_beam/internal/pickler.py", line 65, in load_session
+    return desired_pickle_lib.load_session(file_path)
+  File "/usr/local/lib/python3.7/site-packages/apache_beam/internal/dill_pickler.py", line 313, in load_session
+    return dill.load_session(file_path)
+  File "/usr/local/lib/python3.7/site-packages/dill/_dill.py", line 368, in load_session
+    module = unpickler.load()
+  File "/usr/local/lib/python3.7/site-packages/dill/_dill.py", line 472, in load
+    obj = StockUnpickler.load(self)
+TypeError: code() takes at most 15 arguments (16 given)
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/apache_beam/runners/worker/sdk_worker_main.py", line 116, in create_harness
+    _load_main_session(semi_persistent_directory)
+  File "/usr/local/lib/python3.7/site-packages/apache_beam/runners/worker/sdk_worker_main.py", line 332, in _load_main_session
+    pickler.load_session(session_file)
+  File "/usr/local/lib/python3.7/site-packages/apache_beam/internal/pickler.py", line 65, in load_session
+    return desired_pickle_lib.load_session(file_path)
+  File "/usr/local/lib/python3.7/site-packages/apache_beam/internal/dill_pickler.py", line 313, in load_session
+    return dill.load_session(file_path)
+  File "/usr/local/lib/python3.7/site-packages/dill/_dill.py", line 368, in load_session
+    module = unpickler.load()
+  File "/usr/local/lib/python3.7/site-packages/dill/_dill.py", line 472, in load
+    obj = StockUnpickler.load(self)
+TypeError: code() takes at most 15 arguments (16 given)
+
+
+sdk_worker_main.py: error: argument --flink_version: invalid choice: '1.18' (choose from '1.12', '1.13', '1.14', '1.15')
