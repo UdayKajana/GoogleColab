@@ -1,13 +1,79 @@
-FROM python:3.9-slim
-WORKDIR /workspace
-RUN apt-get update && apt-get install -y \
-build-essential \
-libffi-dev \
-libssl-dev \
-wget \
-&& apt-get clean \
-&& rm -rf /var/lib/apt/lists/*
-COPY requirements.txt /workspace/requirements.txt
-RUN pip install --upgrade pip && pip install --no-cache-dir -r /workspace/requirements.txt
-COPY dfpipeline.py /workspace/pipeline.py
-CMD ["python3", "/workspace/pipeline.py"]
+# dfpipeline.py
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+import argparse
+import logging
+
+def run(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--query',
+        required=True,
+        help='BigQuery SQL query to execute'
+    )
+    parser.add_argument(
+        '--project',
+        required=True,
+        help='GCP Project ID'
+    )
+    
+    known_args, pipeline_args = parser.parse_known_args(argv)
+    pipeline_options = PipelineOptions(pipeline_args)
+    
+    # Configure logging
+    logging.getLogger().setLevel(logging.INFO)
+    
+    # Build and run the pipeline
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        (pipeline 
+         | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
+             query=known_args.query,
+             use_standard_sql=True,
+             project=known_args.project)
+         | 'LogRows' >> beam.Map(lambda row: logging.info(f"Row Data: {row}"))
+        )
+
+if __name__ == '__main__':
+    run()
+
+
+
+{
+    "name": "BigQuery Read Pipeline",
+    "description": "A pipeline that reads from BigQuery and logs the results",
+    "parameters": [
+        {
+            "name": "query",
+            "label": "BigQuery Query",
+            "helpText": "The SQL query to execute in BigQuery",
+            "isOptional": false,
+            "regexes": [],
+            "paramType": "TEXT"
+        },
+        {
+            "name": "project",
+            "label": "GCP Project ID",
+            "helpText": "The Google Cloud project ID where BigQuery is located",
+            "isOptional": false,
+            "regexes": [],
+            "paramType": "TEXT"
+        },
+        {
+            "name": "temp_location",
+            "label": "Temporary Location",
+            "helpText": "GCS path for temporary files",
+            "isOptional": false,
+            "regexes": ["^gs:\\/\\/[^\\n\\r]+$"],
+            "paramType": "TEXT"
+        }
+    ]
+}
+
+
+
+gcloud dataflow flex-template run "bq-read-job-$(date +%Y%m%d-%H%M%S)" \
+    --template-file-gcs-location "gs://$BUCKET_NAME/templates/bigquery-read.json" \
+    --region "$REGION" \
+    --parameters query="SELECT * FROM \`your-project.dataset.table\` LIMIT 10" \
+    --parameters project="$PROJECT_ID" \
+    --parameters temp_location="gs://$BUCKET_NAME/temp"
