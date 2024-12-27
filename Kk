@@ -1,18 +1,69 @@
-# Use the Apache Beam Python 3.9 SDK as the base image
-FROM apache/beam_python3.9_sdk:2.48.0
-
-# Install dependencies
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the pipeline Python file into the container
-COPY dfpipeline.py /app/dfpipeline.py
-
-# Add the Dataflow Flex Template launcher script
-RUN apt-get update && apt-get install -y wget && \
-    wget -O /opt/google/dataflow/python_template_launcher https://storage.googleapis.com/dataflow-flex-templates/python/launcher/python_template_launcher && \
-    chmod +x /opt/google/dataflow/python_template_launcher
-
-# Set the default entrypoint for Flex Templates
+# Use Apache Beam's official Python SDK image  
+FROM apache/beam_python3.9_sdk:2.48.0  
+  
+# Set working directory  
+WORKDIR /workspace  
+  
+# Install additional system dependencies if needed  
+RUN apt-get update && apt-get install -y \  
+   build-essential \  
+   libffi-dev \  
+   libssl-dev \  
+   && apt-get clean \  
+   && rm -rf /var/lib/apt/lists/*  
+  
+# Create non-root user  
+RUN groupadd -r appuser && useradd -r -g appuser appuser  
+  
+# Copy requirements file  
+COPY requirements.txt /workspace/requirements.txt  
+  
+# Install Python dependencies  
+RUN pip install --upgrade pip && \  
+   pip install --no-cache-dir -r /workspace/requirements.txt  
+  
+# Copy pipeline code  
+COPY dfpipeline.py /workspace/pipeline.py  
+  
+# Copy python_template_launcher script  
+COPY python_template_launcher /opt/google/dataflow/python_template_launcher  
+RUN chmod +x /opt/google/dataflow/python_template_launcher  
+  
+# Set permissions  
+RUN chown -R appuser:appuser /workspace && \  
+   mkdir -p /home/appuser/.local && \  
+   chown -R appuser:appuser /home/appuser  
+  
+# Switch to non-root user  
+USER appuser  
+  
+# Set Python path to include user site-packages  
+ENV PYTHONPATH=/home/appuser/.local/lib/python3.9/site-packages:$PYTHONPATH  
+  
+# Use the launcher that comes with the Apache Beam SDK image  
 ENTRYPOINT ["/opt/google/dataflow/python_template_launcher"]
+
+
+
+docker build -t us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 .  
+docker push us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1  
+  
+gcloud dataflow flex-template build \  
+gs://vznet-test/wireline_churn_test/src/template.json \  
+--image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 \  
+--sdk-language "PYTHON" \  
+--metadata-file /home/udayka/workspace/metadata.json  
+  
+gcloud dataflow flex-template run bigquery123 \  
+--template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \  
+--region us-east4 \  
+--parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10",project="vz-it-np-gudv-dev-vzntdo-0" \  
+--temp-location=gs://vznet-test/wireline_churn_test/tmp/ \  
+--num-workers 2 \  
+--max-workers 2 \  
+--worker-machine-type n2-standard-2 \  
+--disable-public-ips \  
+--network=shared-np-east \  
+--dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \  
+--subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \  
+--service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com
