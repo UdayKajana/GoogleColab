@@ -1,1 +1,18 @@
-docker: Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: exec: "/opt/google/dataflow/python_template_launcher": stat /opt/google/dataflow/python_template_launcher: no such file or directory: unknown.
+# Use the Apache Beam Python 3.9 SDK as the base image
+FROM apache/beam_python3.9_sdk:2.48.0
+
+# Install dependencies
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the pipeline Python file into the container
+COPY dfpipeline.py /app/dfpipeline.py
+
+# Add the Dataflow Flex Template launcher script
+RUN apt-get update && apt-get install -y wget && \
+    wget -O /opt/google/dataflow/python_template_launcher https://storage.googleapis.com/dataflow-flex-templates/python/launcher/python_template_launcher && \
+    chmod +x /opt/google/dataflow/python_template_launcher
+
+# Set the default entrypoint for Flex Templates
+ENTRYPOINT ["/opt/google/dataflow/python_template_launcher"]
