@@ -77,3 +77,26 @@ gcloud dataflow flex-template run "bq-read-job-$(date +%Y%m%d-%H%M%S)" \
     --parameters query="SELECT * FROM \`your-project.dataset.table\` LIMIT 10" \
     --parameters project="$PROJECT_ID" \
     --parameters temp_location="gs://$BUCKET_NAME/temp"
+
+
+
+ gcloud dataflow flex-template run bigquery123 \
+--template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
+--region us-east4 \
+--parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10" \
+--parameters project="vz-it-np-gudv-dev-vzntdo-0" \
+--parameters temp_location gs://vznet-test/wireline_churn_test/tmp/
+ERROR: (gcloud.dataflow.flex-template.run) argument --parameters: Bad syntax for dict arg: [temp_location]. Please see `gcloud topic flags-file` or `gcloud topic escaping` for information on providing list or dictionary flag values with special characters.
+Usage: gcloud dataflow flex-template run JOB_NAME --template-file-gcs-location=TEMPLATE_FILE_GCS_LOCATION [optional flags]
+  optional flags may be  --additional-experiments | --additional-user-labels |
+                         --dataflow-kms-key | --disable-public-ips |
+                         --enable-streaming-engine | --flexrs-goal | --help |
+                         --max-workers | --network | --num-workers |
+                         --parameters | --region | --service-account-email |
+                         --staging-location | --subnetwork | --temp-location |
+                         --transform-name-mappings | --update |
+                         --worker-machine-type | --worker-region | --worker-zone
+
+For detailed information on this command and its flags, run:
+  gcloud dataflow flex-template run --help
+
