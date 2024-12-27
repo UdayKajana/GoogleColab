@@ -1,102 +1,20 @@
-# dfpipeline.py
-import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions
-import argparse
-import logging
-
-def run(argv=None):
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--query',
-        required=True,
-        help='BigQuery SQL query to execute'
-    )
-    parser.add_argument(
-        '--project',
-        required=True,
-        help='GCP Project ID'
-    )
-    
-    known_args, pipeline_args = parser.parse_known_args(argv)
-    pipeline_options = PipelineOptions(pipeline_args)
-    
-    # Configure logging
-    logging.getLogger().setLevel(logging.INFO)
-    
-    # Build and run the pipeline
-    with beam.Pipeline(options=pipeline_options) as pipeline:
-        (pipeline 
-         | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
-             query=known_args.query,
-             use_standard_sql=True,
-             project=known_args.project)
-         | 'LogRows' >> beam.Map(lambda row: logging.info(f"Row Data: {row}"))
-        )
-
-if __name__ == '__main__':
-    run()
+[91mWARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
 
 
-
-{
-    "name": "BigQuery Read Pipeline",
-    "description": "A pipeline that reads from BigQuery and logs the results",
-    "parameters": [
-        {
-            "name": "query",
-            "label": "BigQuery Query",
-            "helpText": "The SQL query to execute in BigQuery",
-            "isOptional": false,
-            "regexes": [],
-            "paramType": "TEXT"
-        },
-        {
-            "name": "project",
-            "label": "GCP Project ID",
-            "helpText": "The Google Cloud project ID where BigQuery is located",
-            "isOptional": false,
-            "regexes": [],
-            "paramType": "TEXT"
-        },
-        {
-            "name": "temp_location",
-            "label": "Temporary Location",
-            "helpText": "GCS path for temporary files",
-            "isOptional": false,
-            "regexes": ["^gs:\\/\\/[^\\n\\r]+$"],
-            "paramType": "TEXT"
-        }
-    ]
-}
-
-
-
-gcloud dataflow flex-template run "bq-read-job-$(date +%Y%m%d-%H%M%S)" \
-    --template-file-gcs-location "gs://$BUCKET_NAME/templates/bigquery-read.json" \
-    --region "$REGION" \
-    --parameters query="SELECT * FROM \`your-project.dataset.table\` LIMIT 10" \
-    --parameters project="$PROJECT_ID" \
-    --parameters temp_location="gs://$BUCKET_NAME/temp"
-
-
-
- gcloud dataflow flex-template run bigquery123 \
---template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
---region us-east4 \
---parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10" \
---parameters project="vz-it-np-gudv-dev-vzntdo-0" \
---parameters temp_location gs://vznet-test/wireline_churn_test/tmp/
-ERROR: (gcloud.dataflow.flex-template.run) argument --parameters: Bad syntax for dict arg: [temp_location]. Please see `gcloud topic flags-file` or `gcloud topic escaping` for information on providing list or dictionary flag values with special characters.
-Usage: gcloud dataflow flex-template run JOB_NAME --template-file-gcs-location=TEMPLATE_FILE_GCS_LOCATION [optional flags]
-  optional flags may be  --additional-experiments | --additional-user-labels |
-                         --dataflow-kms-key | --disable-public-ips |
-                         --enable-streaming-engine | --flexrs-goal | --help |
-                         --max-workers | --network | --num-workers |
-                         --parameters | --region | --service-account-email |
-                         --staging-location | --subnetwork | --temp-location |
-                         --transform-name-mappings | --update |
-                         --worker-machine-type | --worker-region | --worker-zone
-
-For detailed information on this command and its flags, run:
-  gcloud dataflow flex-template run --help
-
+FROM python:3.9-slim
+FROM apache/beam_python3.9_sdk:2.48.0
+WORKDIR /workspace
+RUN apt-get update && apt-get install -y \
+build-essential \
+libffi-dev \
+libssl-dev \
+wget \
+&& apt-get clean \
+&& rm -rf /var/lib/apt/lists/*
+COPY requirements.txt /workspace/requirements.txt
+RUN pip install --upgrade pip && pip install --no-cache-dir -r /workspace/requirements.txt
+RUN apt-get update && apt-get install -y wget && \
+    wget -O /opt/google/dataflow/python_template_launcher https://storage.googleapis.com/dataflow-flex-templates/python/launcher/python_template_launcher && \
+    chmod +x /opt/google/dataflow/python_template_launcher
+COPY dfpipeline.py /workspace/pipeline.py
+ENTRYPOINT ["/opt/google/dataflow/python_template_launcher"]
