@@ -49,3 +49,25 @@ USER appuser
 ENV PYTHONPATH=/home/appuser/.local/lib/python3.9/site-packages:$PYTHONPATH
 
 ENTRYPOINT ["/opt/google/dataflow/python_template_launcher"]
+
+
+
+
+2024-12-27 18:16:23.350 IST
+Adding config for all GCR and AR registries.
+2024-12-27 18:16:23.351 IST
+/home/cloudservice/.docker/config.json configured to use this credential helper for GCR and AR registries
+2024-12-27 18:16:23.407 IST
+5909a03a956bbc85dd45fee1705422549d7aa597395b70b6cb53edb7316ae077
+2024-12-27 18:16:23.537 IST
+Credentials not provided. Not logging into Docker private registry.
+2024-12-27 18:16:23.540 IST
+Started cloudservice.service.
+2024-12-27 18:16:24.315 IST
+exec /opt/google/dataflow/python_template_launcher: exec format error
+2024-12-27 18:16:24.316 IST
+cloudservice.service: Main process exited, code=exited, status=1/FAILURE
+2024-12-27 18:16:24.650 IST
+cloudservice.service: Failed with result 'exit-code'.
+
+
