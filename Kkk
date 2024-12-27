@@ -26,8 +26,9 @@ COPY requirements.txt /workspace/requirements.txt
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r /workspace/requirements.txt --user
 
-# Download and setup Dataflow launcher
-RUN wget -O /opt/google/dataflow/python_template_launcher \
+# Create directory structure and download launcher
+RUN mkdir -p /opt/google/dataflow && \
+    wget -O /opt/google/dataflow/python_template_launcher \
     https://storage.googleapis.com/dataflow-flex-templates/python/launcher/python_template_launcher && \
     chmod +x /opt/google/dataflow/python_template_launcher
 
@@ -36,7 +37,7 @@ COPY dfpipeline.py /workspace/pipeline.py
 
 # Set permissions
 RUN chown -R appuser:appuser /workspace \
-    && chown -R appuser:appuser /opt/google/dataflow/python_template_launcher \
+    && chown -R appuser:appuser /opt/google/dataflow \
     && mkdir -p /home/appuser/.local && chown -R appuser:appuser /home/appuser
 
 # Switch to non-root user
