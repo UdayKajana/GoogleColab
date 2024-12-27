@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     libssl-dev \
     wget \
+    curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -26,10 +27,11 @@ COPY requirements.txt /workspace/requirements.txt
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r /workspace/requirements.txt --user
 
-# Create directory structure and download launcher
+# Create directory structure and download launcher using curl with retry
 RUN mkdir -p /opt/google/dataflow && \
-    wget -O /opt/google/dataflow/python_template_launcher \
-    https://storage.googleapis.com/dataflow-flex-templates/python/launcher/python_template_launcher && \
+    curl -L --retry 3 --retry-delay 5 \
+    https://storage.googleapis.com/dataflow-flex-templates/python/launcher/python_template_launcher \
+    -o /opt/google/dataflow/python_template_launcher && \
     chmod +x /opt/google/dataflow/python_template_launcher
 
 # Copy pipeline code
@@ -47,33 +49,3 @@ USER appuser
 ENV PYTHONPATH=/home/appuser/.local/lib/python3.9/site-packages:$PYTHONPATH
 
 ENTRYPOINT ["/opt/google/dataflow/python_template_launcher"]
-
-
-
-2024-12-27 17:58:43.034 IST
-The command '/bin/sh -c mkdir -p /opt/google/dataflow &&     wget -O /opt/google/dataflow/python_template_launcher     https://storage.googleapis.com/dataflow-flex-templates/python/launcher/python_template_launcher &&     chmod +x /opt/google/dataflow/python_template_launcher' returned a non-zero code: 8
-{
-httpRequest: null
-insertId: "cb3f86f5-c82e-412c-836f-bf81bbe5ae92-987"
-jsonPayload: null
-labels: {0}
-logName: "projects/vz-it-np-gudv-dev-vzntdo-0/logs/cloudbuild"
-operation: null
-payload: "textPayload"
-protoPayload: null
-receiveLocation: "us-central1"
-receiveTimestamp: "2024-12-27T12:28:43.060456510Z"
-resource: {2}
-severity: "INFO"
-sourceLocation: null
-split: null
-textPayload: "The command '/bin/sh -c mkdir -p /opt/google/dataflow &&     wget -O /opt/google/dataflow/python_template_launcher     https://storage.googleapis.com/dataflow-flex-templates/python/launcher/python_template_launcher &&     chmod +x /opt/google/dataflow/python_template_launcher' returned a non-zero code: 8"
-timestamp: "2024-12-27T12:28:43.034625813Z"
-traceSampled: false
-}
-2024-12-27 17:58:43.254 IST
-ERROR
-2024-12-27 17:58:43.254 IST
-ERROR: build step 0 "gcr.io/cloud-builders/docker" failed: step exited with non-zero status: 8
-2024-12-27 17:58:43.384 IST
-[0m
