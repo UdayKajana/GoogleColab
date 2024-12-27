@@ -1,20 +1,48 @@
-[91mWARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
-
-
+# Start with Python 3.9 slim base image
 FROM python:3.9-slim
-FROM apache/beam_python3.9_sdk:2.48.0
-WORKDIR /workspace
+
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
-build-essential \
-libffi-dev \
-libssl-dev \
-wget \
-&& apt-get clean \
-&& rm -rf /var/lib/apt/lists/*
+    build-essential \
+    libffi-dev \
+    libssl-dev \
+    wget \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Apache Beam SDK
+RUN pip install apache-beam[gcp]==2.48.0
+
+# Set working directory
+WORKDIR /workspace
+
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Copy requirements file
 COPY requirements.txt /workspace/requirements.txt
-RUN pip install --upgrade pip && pip install --no-cache-dir -r /workspace/requirements.txt
-RUN apt-get update && apt-get install -y wget && \
-    wget -O /opt/google/dataflow/python_template_launcher https://storage.googleapis.com/dataflow-flex-templates/python/launcher/python_template_launcher && \
+
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r /workspace/requirements.txt --user
+
+# Download and setup Dataflow launcher
+RUN wget -O /opt/google/dataflow/python_template_launcher \
+    https://storage.googleapis.com/dataflow-flex-templates/python/launcher/python_template_launcher && \
     chmod +x /opt/google/dataflow/python_template_launcher
+
+# Copy pipeline code
 COPY dfpipeline.py /workspace/pipeline.py
+
+# Set permissions
+RUN chown -R appuser:appuser /workspace \
+    && chown -R appuser:appuser /opt/google/dataflow/python_template_launcher \
+    && mkdir -p /home/appuser/.local && chown -R appuser:appuser /home/appuser
+
+# Switch to non-root user
+USER appuser
+
+# Set Python path to include user site-packages
+ENV PYTHONPATH=/home/appuser/.local/lib/python3.9/site-packages:$PYTHONPATH
+
 ENTRYPOINT ["/opt/google/dataflow/python_template_launcher"]
