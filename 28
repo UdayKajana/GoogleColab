@@ -1,29 +1,3 @@
-python3 pipeline.py \
---project vz-it-np-gudv-dev-vzntdo-0 \
---runner DataflowRunner \
---region us-east4 \
---parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10" \
---staging_location gs://vznet-test/wireline_churn_bq_spanner/stg \
---temp_location gs://vznet-test/wireline_churn_test/tmp/ \
---template_location gs://vznet-test/wireline_churn_test/code/wireline_churn_pubsub_csv
-Traceback (most recent call last):
-  File "/home/udayka/workspace/pipeline.py", line 39, in <module>
-    run()
-  File "/home/udayka/workspace/pipeline.py", line 27, in run
-    with beam.Pipeline(options=pipeline_options) as pipeline:
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 210, in __init__
-    errors = PipelineOptionsValidator(self._options, runner).validate()
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/options/pipeline_options_validator.py", line 149, in validate
-    errors.extend(self.options.view_as(cls).validate(self))
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/options/pipeline_options.py", line 1032, in validate
-    errors.extend(validator.validate_cloud_options(self))
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/options/pipeline_options_validator.py", line 210, in validate_cloud_options
-    if self.is_full_string_match(self.PROJECT_NUMBER_PATTERN, project):
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/options/pipeline_options_validator.py", line 171, in is_full_string_match
-    return re.search(pattern, string) is not None
-  File "/usr/lib64/python3.9/re.py", line 201, in search
-    return _compile(pattern, flags).search(string)
-TypeError: expected string or bytes-like object
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.options.pipeline_options import StandardOptions
@@ -63,3 +37,62 @@ def run():
 
 if __name__ == '__main__':
     run()
+
+
+metadata.json file:
+{
+    "name": "Bigquery to GCS Pipeline",
+    "description": "A template for reading from BigQuery and processing data",
+    "parameters": [
+        {
+            "name": "query",
+            "label": "BigQuery SQL query",
+            "helpText": "The SQL query to execute",
+            "isOptional": false,
+            "regexes": [],
+            "paramType": "TEXT"
+        }
+    ],
+    "defaultEnvironment": {
+        "tempLocation": "gs://vznet-test/wireline_churn_test/tmp/",
+        "network": "shared-np-east",
+        "subnetwork": "https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2",
+        "serviceAccountEmail": "sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com",
+        "project": "vz-it-np-gudv-dev-vzntdo-0"
+    }
+}
+
+
+my docker image is with:
+FROM gcr.io/dataflow-templates-base/python39-template-launcher-base
+
+# Set working directory
+WORKDIR /template
+
+# Install additional system dependencies if needed
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libffi-dev \
+    libssl-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements file
+COPY requirements.txt /template/requirements.txt
+
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r /template/requirements.txt
+
+# Copy pipeline code
+COPY pipeline.py /template/pipeline.py
+
+# Set required environment variables
+ENV FLEX_TEMPLATE_PYTHON_PY_FILE="/template/pipeline.py"
+ENV FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE="/template/requirements.txt"
+ENV FLEX_TEMPLATE_PYTHON_SETUP_FILE=""
+ENV FLEX_TEMPLATE_PYTHON_OPTIONS="--runner=DataflowRunner"
+
+
+gcloud dataflow flex-template run bigquery123 --template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json --project vz-it-np-gudv-dev-vzntdo-0 --region us-east4 --parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10" --temp-location gs://vznet-test/wireline_churn_test/tmp/ --num-workers 2 --max-workers 2 --worker-machine-type n2-standard-2 --disable-public-ips --network=shared-np-east --dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv --subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 --service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com
+gcloud dataflow flex-template build gs://vznet-test/wireline_churn_test/src/template.json --image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 --sdk-language "PYTHON" --metadata-file metadata.json
