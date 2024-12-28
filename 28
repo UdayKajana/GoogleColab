@@ -1,58 +1,33 @@
-import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions
-import argparse
-import logging
 
-def run(argv=None):
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--query',
-        required=True,
-        help='BigQuery SQL query to execute'
-    )
-    parser.add_argument(
-        '--project',
-        required=True,
-        help='GCP Project ID'
-    )
-    
-    # Parse arguments
-    known_args, pipeline_args = parser.parse_known_args(argv)
-    
-    # Ensure project is in pipeline_args
-    if '--project' not in ' '.join(pipeline_args):
-        pipeline_args.extend(['--project', known_args.project])
-    
-    # Create pipeline options with all arguments
-    pipeline_options = PipelineOptions(pipeline_args)
-    
-    # Set up logging
-    logging.getLogger().setLevel(logging.INFO)
-    
-    # Create and run pipeline
-    with beam.Pipeline(options=pipeline_options) as pipeline:
-        (pipeline 
-         | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
-             query=known_args.query,
-             use_standard_sql=True,
-             project=known_args.project)  # This project parameter is used for the BigQuery client
-         | 'LogRows' >> beam.Map(lambda row: logging.info(f"Row Data: {row}"))
-        )
-
-if __name__ == '__main__':
-    run()
-
-
-gcloud dataflow flex-template run bigquery123 \
---template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
---region us-east4 \
---parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10",project="vz-it-np-gudv-dev-vzntdo-0" \
---temp-location=gs://vznet-test/wireline_churn_test/tmp/ \
---num-workers 2 \
---max-workers 2 \
---worker-machine-type n2-standard-2 \
---disable-public-ips \
---network=shared-np-east \
---dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
---subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
---service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com
+{"severity":"INFO","time":"2024/12/28 16:45:17.474302","line":"python_template_launcher.go:40","message":"Started template launcher."}
+{"severity":"INFO","time":"2024/12/28 16:45:17.497559","line":"python_template_launcher.go:44","message":"Initialize Python template."}
+{"severity":"INFO","time":"2024/12/28 16:45:17.497578","line":"python_template.go:98","message":"Falling back to using template-container args from metadata: template-container-args"}
+{"severity":"INFO","time":"2024/12/28 16:45:17.499762","line":"python_template.go:108","message":"Validating template-container-args: {\"additionalBoolParameters\":[\"no_use_public_ips\"],\"consoleLogsLocation\":\"gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-28_08_43_25-12858747873272216815/console_logs\",\"environment\":{\"network\":\"shared-np-east\",\"region\":\"us-east4\",\"serviceAccountEmail\":\"sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com\",\"stagingLocation\":\"gs://dataflow-staging-us-east4-206482042907/staging\",\"subnetwork\":\"https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2\",\"tempLocation\":\"gs://vznet-test/wireline_churn_test/tmp/\"},\"jobId\":\"2024-12-28_08_43_25-12858747873272216815\",\"jobName\":\"bigquery123\",\"jobObjectLocation\":\"gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-28_08_43_25-12858747873272216815/job_object\",\"operationResultLocation\":\"gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-28_08_43_25-12858747873272216815/operation_result\",\"parameters\":{\"dataflow_kms_key\":\"projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv\",\"machine_type\":\"n2-standard-2\",\"max_num_workers\":\"2\",\"network\":\"shared-np-east\",\"num_workers\":\"2\",\"project\":\"vz-it-np-gudv-dev-vzntdo-0\",\"query\":\"SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10\",\"service_account_email\":\"sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com\",\"staging_location\":\"gs://dataflow-staging-us-east4-206482042907/staging\",\"subnetwork\":\"https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2\",\"temp_location\":\"gs://vznet-test/wireline_churn_test/tmp/\"},\"projectId\":\"vz-it-np-gudv-dev-vzntdo-0\"}"}
+{"severity":"INFO","time":"2024/12/28 16:45:17.500768","line":"python_template.go:117","message":"Extracting operation result location."}
+{"severity":"INFO","time":"2024/12/28 16:45:17.500798","line":"python_template.go:125","message":"Operation result location: gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-28_08_43_25-12858747873272216815/operation_result"}
+{"severity":"INFO","time":"2024/12/28 16:45:17.500834","line":"python_template.go:128","message":"Extracting console log location."}
+{"severity":"INFO","time":"2024/12/28 16:45:17.500855","line":"python_template.go:136","message":"Console logs location: gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-28_08_43_25-12858747873272216815/console_logs"}
+{"severity":"INFO","time":"2024/12/28 16:45:17.500880","line":"python_template.go:139","message":"Extracting Python command specs."}
+{"severity":"INFO","time":"2024/12/28 16:45:17.501381","line":"python_template.go:148","message":"Generating launch args."}
+{"severity":"INFO","time":"2024/12/28 16:45:17.501521","line":"python_args.go:236","message":"Overriding subnetwork with value: https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 (previous value: https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2)"}
+{"severity":"INFO","time":"2024/12/28 16:45:17.501553","line":"python_args.go:236","message":"Overriding temp_location with value: gs://vznet-test/wireline_churn_test/tmp/ (previous value: gs://vznet-test/wireline_churn_test/tmp/)"}
+{"severity":"INFO","time":"2024/12/28 16:45:17.501597","line":"python_args.go:236","message":"Overriding staging_location with value: gs://dataflow-staging-us-east4-206482042907/staging (previous value: gs://dataflow-staging-us-east4-206482042907/staging)"}
+{"severity":"INFO","time":"2024/12/28 16:45:17.501624","line":"python_args.go:236","message":"Overriding network with value: shared-np-east (previous value: shared-np-east)"}
+{"severity":"INFO","time":"2024/12/28 16:45:17.501638","line":"python_args.go:236","message":"Overriding service_account_email with value: sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com (previous value: sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com)"}
+{"severity":"INFO","time":"2024/12/28 16:45:17.501720","line":"python_args.go:232","message":"Skipping dissallowed override: project"}
+{"severity":"INFO","time":"2024/12/28 16:45:17.501782","line":"launch.go:50","message":"Validating ExpectedFeatures."}
+{"severity":"INFO","time":"2024/12/28 16:45:17.501804","line":"launch.go:75","message":"Launching Python template."}
+{"severity":"INFO","time":"2024/12/28 16:45:17.501843","line":"python_template.go:64","message":"Using launch args: [/template/pipeline.py --requirements_file=/template/requirements.txt --runner=DataflowRunner --service_account_email=sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com --temp_location=gs://vznet-test/wireline_churn_test/tmp/ --dataflow_kms_key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv --network=shared-np-east --query=SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10 --machine_type=n2-standard-2 --project=vz-it-np-gudv-dev-vzntdo-0 --template_location=gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-28_08_43_25-12858747873272216815/job_object --region=us-east4 --subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 --num_workers=2 --job_name=bigquery123 --staging_location=gs://dataflow-staging-us-east4-206482042907/staging --max_num_workers=2 --no_use_public_ips]"}
+{"severity":"INFO","time":"2024/12/28 16:45:17.501915","line":"exec.go:38","message":"Executing: python /template/pipeline.py --requirements_file=/template/requirements.txt --runner=DataflowRunner --service_account_email=sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com --temp_location=gs://vznet-test/wireline_churn_test/tmp/ --dataflow_kms_key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv --network=shared-np-east --query=SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10 --machine_type=n2-standard-2 --project=vz-it-np-gudv-dev-vzntdo-0 --template_location=gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-28_08_43_25-12858747873272216815/job_object --region=us-east4 --subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 --num_workers=2 --job_name=bigquery123 --staging_location=gs://dataflow-staging-us-east4-206482042907/staging --max_num_workers=2 --no_use_public_ips"}
+{"severity":"INFO","time":"2024/12/28 16:45:20.044602","line":"exec.go:66","message":"Traceback (most recent call last):"}
+{"severity":"INFO","time":"2024/12/28 16:45:20.044734","line":"exec.go:66","message":"  File \"/template/pipeline.py\", line 32, in \u003cmodule\u003e"}
+{"severity":"INFO","time":"2024/12/28 16:45:20.044936","line":"exec.go:66","message":"    run()"}
+{"severity":"INFO","time":"2024/12/28 16:45:20.044993","line":"exec.go:66","message":"  File \"/template/pipeline.py\", line 22, in run"}
+{"severity":"INFO","time":"2024/12/28 16:45:20.045120","line":"exec.go:66","message":"    with beam.Pipeline(options=pipeline_options) as pipeline:"}
+{"severity":"INFO","time":"2024/12/28 16:45:20.045202","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/site-packages/apache_beam/pipeline.py\", line 212, in __init__"}
+{"severity":"INFO","time":"2024/12/28 16:45:20.045422","line":"exec.go:66","message":"    raise ValueError("}
+{"severity":"INFO","time":"2024/12/28 16:45:20.045483","line":"exec.go:66","message":"ValueError: Pipeline has validations errors: "}
+{"severity":"INFO","time":"2024/12/28 16:45:20.045500","line":"exec.go:66","message":"Missing required option: project."}
+{"severity":"INFO","time":"2024/12/28 16:45:20.260647","line":"exec.go:52","message":"python failed with exit status 1"}
+{"severity":"ERROR","time":"2024/12/28 16:45:20.260737","line":"launch.go:80","message":"Error: Template launch failed: exit status 1"}
+{"severity":"INFO","time":"2024/12/28 16:45:20.260766","line":"launch.go:102","message":"Uploading console logs to GCS location: gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-28_08_43_25-12858747873272216815/console_logs"}
