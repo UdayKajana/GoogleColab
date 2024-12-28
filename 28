@@ -1,4 +1,72 @@
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+import argparse
+import logging
 
+def run(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--query',
+        required=True,
+        help='BigQuery SQL query to execute'
+    )
+    parser.add_argument(
+        '--project',
+        required=True,
+        help='GCP Project ID'
+    )
+    
+    # Parse arguments
+    known_args, pipeline_args = parser.parse_known_args(argv)
+    
+    # Ensure project is in pipeline_args
+    if '--project' not in ' '.join(pipeline_args):
+        pipeline_args.extend(['--project', known_args.project])
+    
+    # Create pipeline options with all arguments
+    pipeline_options = PipelineOptions(pipeline_args)
+    
+    # Set up logging
+    logging.getLogger().setLevel(logging.INFO)
+    
+    # Create and run pipeline
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        (pipeline 
+         | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
+             query=known_args.query,
+             use_standard_sql=True,
+             project=known_args.project)  # This project parameter is used for the BigQuery client
+         | 'LogRows' >> beam.Map(lambda row: logging.info(f"Row Data: {row}"))
+        )
+
+if __name__ == '__main__':
+    run()
+
+{
+    "name": "BigQuery Read Pipeline",
+    "description": "Production pipeline that reads from BigQuery and logs the results",
+    "parameters": [
+        {
+            "name": "query",
+            "label": "BigQuery Query",
+            "helpText": "The SQL query to execute in BigQuery",
+            "isOptional": false,
+            "regexes": [],
+            "paramType": "TEXT"
+        },
+        {
+            "name": "project",
+            "label": "GCP Project ID",
+            "helpText": "The Google Cloud project ID where BigQuery is located",
+            "isOptional": false,
+            "regexes": ["^[a-z][a-z0-9-]{4,28}[a-z0-9]$"],
+            "paramType": "TEXT"
+        }
+    ],
+    "sdk_info": {
+        "language": "PYTHON"
+    }
+}
 {"severity":"INFO","time":"2024/12/28 16:45:17.474302","line":"python_template_launcher.go:40","message":"Started template launcher."}
 {"severity":"INFO","time":"2024/12/28 16:45:17.497559","line":"python_template_launcher.go:44","message":"Initialize Python template."}
 {"severity":"INFO","time":"2024/12/28 16:45:17.497578","line":"python_template.go:98","message":"Falling back to using template-container args from metadata: template-container-args"}
