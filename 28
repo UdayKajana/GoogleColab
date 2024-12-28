@@ -60,15 +60,76 @@ if __name__ == '__main__':
     }
 }
 
-# Dockerfile
-FROM apache/beam_python3.9_sdk:2.52.0
+# Build template
+gcloud dataflow flex-template build \
+gs://vznet-test/wireline_churn_test/src/template.json \
+--image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 \
+--sdk-language "PYTHON" \
+--metadata-file metadata.json
 
-WORKDIR /template
+# Run template
+gcloud dataflow flex-template run bigquery123 \
+--template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
+--project vz-it-np-gudv-dev-vzntdo-0 \
+--region us-east4 \
+--parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10" \
+--temp-location=gs://vznet-test/wireline_churn_test/tmp/ \
+--num-workers 2 \
+--max-workers 2 \
+--worker-machine-type n2-standard-2 \
+--disable-public-ips \
+--network=shared-np-east \
+--dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
+--subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
+--service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com
 
-COPY requirements.txt .
-COPY pipeline.py .
 
-RUN pip install -r requirements.txt
 
-# requirements.txt
-apache-beam[gcp]==2.52.0
+
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.pipeline_options import StandardOptions
+from apache_beam.options.pipeline_options import GoogleCloudOptions
+from apache_beam.io.gcp.bigquery import ReadFromBigQuery
+
+def run():
+    # Define custom options
+    class CustomOptions(PipelineOptions):
+        @classmethod
+        def _add_argparse_args(cls, parser):
+            parser.add_value_provider_argument('--query', type=str, help='BigQuery SQL query')
+
+    # Parse command line arguments
+    pipeline_options = CustomOptions()
+    
+    # Ensure project is set
+    google_cloud_options = pipeline_options.view_as(GoogleCloudOptions)
+    if not google_cloud_options.project:
+        raise ValueError("Project must be specified.")
+    
+    # Set runner (DataflowRunner for cloud execution)
+    pipeline_options.view_as(StandardOptions).runner = 'DataflowRunner'
+
+    # Create pipeline
+    p = beam.Pipeline(options=pipeline_options)
+    
+    # Read from BigQuery using the provided query
+    records = p | 'ReadFromBigQuery' >> ReadFromBigQuery(
+        query=pipeline_options.query,
+        use_standard_sql=True,
+        gcs_location=pipeline_options.temp_location
+    )
+    
+    # Add your transformations here
+    # Example: records | 'SomeTransform' >> beam.Map(some_function)
+    
+    # Run the pipeline
+    result = p.run()
+    
+    # Wait for the pipeline to finish
+    result.wait_until_finish()
+    
+    return result
+
+if __name__ == '__main__':
+    run()
