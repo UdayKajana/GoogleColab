@@ -1,0 +1,97 @@
+# Use Dataflow's runner image instead of basic Beam SDK
+FROM gcr.io/dataflow-templates-base/python39-template-launcher-base
+
+# Set working directory
+WORKDIR /template
+
+# Install additional system dependencies if needed
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libffi-dev \
+    libssl-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements file
+COPY requirements.txt /template/requirements.txt
+
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r /template/requirements.txt
+
+# Copy pipeline code
+COPY pipeline.py /template/pipeline.py
+
+# Set required environment variables
+ENV FLEX_TEMPLATE_PYTHON_PY_FILE="/template/pipeline.py"
+ENV FLEX_TEMPLATE_PYTHON_SETUP_FILE="/template/setup.py"
+
+# The launcher is included in the base image, no need to override ENTRYPOINT
+
+
+
+
+
+{
+    "name": "BigQuery Read Pipeline",
+    "description": "Production pipeline that reads from BigQuery and logs the results",
+    "parameters": [
+        {
+            "name": "query",
+            "label": "BigQuery Query",
+            "helpText": "The SQL query to execute in BigQuery",
+            "isOptional": false,
+            "regexes": ["^SELECT[\\s\\S]*"],
+            "paramType": "TEXT"
+        },
+        {
+            "name": "project",
+            "label": "GCP Project ID",
+            "helpText": "The Google Cloud project ID where BigQuery is located",
+            "isOptional": false,
+            "regexes": ["^[a-z][a-z0-9-]{4,28}[a-z0-9]$"],
+            "paramType": "TEXT"
+        },
+        {
+            "name": "temp_location",
+            "label": "Temporary Location",
+            "helpText": "GCS location for temporary files",
+            "isOptional": false,
+            "regexes": ["^gs:\\/\\/.*"],
+            "paramType": "TEXT"
+        }
+    ],
+    "sdk_info": {
+        "language": "PYTHON"
+    }
+}
+
+
+
+gcloud dataflow flex-template build \
+gs://vznet-test/wireline_churn_test/src/template.json \
+--image-gcr-path "us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1" \
+--sdk-language "PYTHON" \
+--metadata-file metadata.json \
+--staging-location "gs://vznet-test/wireline_churn_test/staging/" \
+--temp-location "gs://vznet-test/wireline_churn_test/temp/"
+
+
+
+
+
+gcloud dataflow flex-template run "bigquery-read-job-$(date +%Y%m%d-%H%M%S)" \
+--template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
+--region us-east4 \
+--parameters \
+query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10",\
+project="vz-it-np-gudv-dev-vzntdo-0",\
+temp_location="gs://vznet-test/wireline_churn_test/tmp/" \
+--num-workers 2 \
+--max-workers 2 \
+--worker-machine-type n2-standard-2 \
+--disable-public-ips \
+--network=shared-np-east \
+--dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
+--subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
+--service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com
