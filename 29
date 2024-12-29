@@ -1,9 +1,70 @@
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.pipeline_options import StandardOptions
+from apache_beam.options.pipeline_options import GoogleCloudOptions
+from apache_beam.io.gcp.bigquery import ReadFromBigQuery
+import argparse
+import logging
+
+class CustomOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_argument(
+            '--query',
+            required=True,
+            help='BigQuery SQL query to execute'
+        )
+
+def run():
+    """Main entry point."""
+    logging.getLogger().setLevel(logging.INFO)
+    
+    pipeline_options = PipelineOptions()
+    
+    # Set all required options
+    google_cloud_options = pipeline_options.view_as(GoogleCloudOptions)
+    google_cloud_options.project = 'vz-it-np-gudv-dev-vzntdo-0'
+    google_cloud_options.region = 'us-east4'
+    google_cloud_options.temp_location = 'gs://vznet-test/wireline_churn_test/tmp/'
+    google_cloud_options.network = 'shared-np-east'
+    google_cloud_options.subnetwork = 'https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2'
+    google_cloud_options.service_account_email = 'sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com'
+    
+    # Set standard options
+    standard_options = pipeline_options.view_as(StandardOptions)
+    standard_options.runner = 'DataflowRunner'
+    
+    # Set worker options
+    pipeline_options.view_as(beam.pipeline.PipelineOptions).num_workers = 2
+    pipeline_options.view_as(beam.pipeline.PipelineOptions).max_num_workers = 2
+    pipeline_options.view_as(beam.pipeline.PipelineOptions).machine_type = 'n2-standard-2'
+    pipeline_options.view_as(beam.pipeline.PipelineOptions).use_public_ips = False
+    
+    # Get custom options for query
+    custom_options = pipeline_options.view_as(CustomOptions)
+    
+    logging.info(f"Starting pipeline with project: {google_cloud_options.project}")
+    logging.info(f"Query: {custom_options.query}")
+    
+    pipeline = beam.Pipeline(options=pipeline_options)
+    
+    records = pipeline | 'ReadFromBigQuery' >> ReadFromBigQuery(
+        query=custom_options.query,
+        use_standard_sql=True,
+        gcs_location=google_cloud_options.temp_location
+    )
+    
+    transformed_records = records | 'ExampleTransform' >> beam.Map(lambda record: record)
+    
+    result = pipeline.run()
+    result.wait_until_finish()
+
+if __name__ == '__main__':
+    run()
 FROM gcr.io/dataflow-templates-base/python39-template-launcher-base
 
-# Set working directory
 WORKDIR /template
 
-# Install additional system dependencies if needed
 RUN apt-get update && apt-get install -y \
     build-essential \
     libffi-dev \
@@ -11,19 +72,33 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements file
 COPY requirements.txt /template/requirements.txt
+COPY pipeline.py /template/pipeline.py
 
-# Install Python dependencies
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r /template/requirements.txt
 
-# Copy pipeline code
-COPY pipeline.py /template/pipeline.py
-RUN cat /template/pipeline.py
-
-# Set required environment variables
 ENV FLEX_TEMPLATE_PYTHON_PY_FILE="/template/pipeline.py"
 ENV FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE="/template/requirements.txt"
 ENV FLEX_TEMPLATE_PYTHON_SETUP_FILE=""
-ENV FLEX_TEMPLATE_PYTHON_OPTIONS="--runner=DataflowRunner"
+ENV FLEX_TEMPLATE_PYTHON_OPTIONS="--runner=DataflowRunner --project=vz-it-np-gudv-dev-vzntdo-0 --region=us-east4"
+
+
+{
+    "name": "BigQuery Pipeline",
+    "description": "A pipeline that reads from BigQuery with hardcoded configuration",
+    "parameters": [
+        {
+            "name": "query",
+            "label": "BigQuery SQL Query",
+            "helpText": "SQL query to execute in BigQuery",
+            "isOptional": false,
+            "regexes": ["^SELECT[\\s\\S]*"]
+        }
+    ]
+}
+
+apache-beam[gcp]==2.46.0
+gcloud builds submit --tag us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V2 .
+gcloud dataflow flex-template build gs://vznet-test/wireline_churn_test/src/template.json --image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V2 --sdk-language "PYTHON" --metadata-file metadata.json
+gcloud dataflow flex-template run bigquery-pipeline --template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json --project vz-it-np-gudv-dev-vzntdo-0 --parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10"
