@@ -1,133 +1,75 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-import argparse
-import logging
+from apache_beam.options.pipeline_options import StandardOptions
+from apache_beam.options.pipeline_options import GoogleCloudOptions
+from apache_beam.io.gcp.bigquery import ReadFromBigQuery
 
-def run(argv=None):
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--query',
-        required=True,
-        help='BigQuery SQL query to execute'
-    )
-    parser.add_argument(
-        '--project',
-        required=True,
-        help='GCP Project ID'
-    )
-    
-    known_args, pipeline_args = parser.parse_known_args(argv)
-    pipeline_options = PipelineOptions(pipeline_args)
-    logging.getLogger().setLevel(logging.INFO)
+def run():
+    # Define pipeline options
+    pipeline_options = PipelineOptions()
+
+    # Validate Google Cloud options
+    google_cloud_options = pipeline_options.view_as(GoogleCloudOptions)
+    if not google_cloud_options.project:
+        raise ValueError("Project must be specified.")
+    if not google_cloud_options.temp_location:
+        raise ValueError("Temporary GCS location must be specified.")
+    if not google_cloud_options.staging_location:
+        raise ValueError("Staging GCS location must be specified.")
+
+    # Set runner (DataflowRunner for cloud execution)
+    pipeline_options.view_as(StandardOptions).runner = 'DataflowRunner'
+
+    # Debug logs for verification
+    print(f"Project: {google_cloud_options.project}")
+    print(f"Region: {google_cloud_options.region}")
+    print(f"Temp Location: {google_cloud_options.temp_location}")
+    print(f"Staging Location: {google_cloud_options.staging_location}")
+
+    # Create pipeline
     with beam.Pipeline(options=pipeline_options) as pipeline:
-        (pipeline 
-         | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
-             query=known_args.query,
-             use_standard_sql=True,
-             project=known_args.project)
-         | 'LogRows' >> beam.Map(lambda row: logging.info(f"Row Data: {row}"))
+        # Read query from pipeline options
+        query = pipeline_options.view_as(GoogleCloudOptions).query
+        if not query:
+            raise ValueError("Query must be specified.")
+
+        # Read from BigQuery using the provided query
+        records = pipeline | 'ReadFromBigQuery' >> ReadFromBigQuery(
+            query=query
+            use_standard_sql=True,
+            gcs_location=google_cloud_options.temp_location
         )
+
+        # Add your transformations here (example placeholder)
+        transformed_records = records | 'ExampleTransform' >> beam.Map(lambda record: record)
+
+        # Write transformed records or add further processing if needed
 
 if __name__ == '__main__':
     run()
 
-
-
-command to run above code in local:
-python3 pipeline.py \
---runner=DirectRunner \
---project vz-it-np-gudv-dev-vzntdo-0 \
---temp_location=gs://vznet-test/wireline_churn_test/tmp/ \
---template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
---region us-east4 \
---query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10;"
-
-commands to build as riun flex template:
-gcloud dataflow flex-template build \
-gs://vznet-test/wireline_churn_test/src/template.json \
---image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 \
---sdk-language "PYTHON" \
---metadata-file /home/udayka/workspace/metadata.json
-
-gcloud dataflow flex-template run bigquery123 \
---template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
---region us-east4 \
---parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10",project="vz-it-np-gudv-dev-vzntdo-0" \
---temp-location=gs://vznet-test/wireline_churn_test/tmp/ \
---num-workers 2 \
---max-workers 2 \
---worker-machine-type n2-standard-2 \
---disable-public-ips \
---network=shared-np-east \
---dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
---subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
---service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com
-
-
-the metadata file: {
-    "name": "BigQuery Read Pipeline",
-    "description": "A pipeline that reads from BigQuery and logs the results",
+{
+    "name": "Bigquery to GCS Pipeline",
+    "description": "A template for reading from BigQuery and processing data",
     "parameters": [
         {
             "name": "query",
-            "label": "BigQuery Query",
-            "helpText": "The SQL query to execute in BigQuery",
-            "isOptional": false,
-            "regexes": [],
-            "paramType": "TEXT"
-        },
-        {
-            "name": "project",
-            "label": "GCP Project ID",
-            "helpText": "The Google Cloud project ID where BigQuery is located",
+            "label": "BigQuery SQL query",
+            "helpText": "The SQL query to execute",
             "isOptional": false,
             "regexes": [],
             "paramType": "TEXT"
         }
-    ]
+    ],
+    "defaultEnvironment": {
+        "tempLocation": "gs://vznet-test/wireline_churn_test/tmp/",
+        "network": "shared-np-east",
+        "subnetwork": "https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2",
+        "serviceAccountEmail": "sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com",
+        "project": "vz-it-np-gudv-dev-vzntdo-0"
+    }
 }
 
-and my docker image creation file:
-# Use Apache Beam's official Python SDK image
-FROM apache/beam_python3.9_sdk:2.48.0
-
-# Set working directory
-WORKDIR /workspace
-
-# Install additional system dependencies if needed
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libffi-dev \
-    libssl-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-
-# Copy requirements file
-COPY requirements.txt /workspace/requirements.txt
-
-# Install Python dependencies
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r /workspace/requirements.txt
-
-# Copy pipeline code
-COPY dfpipeline.py /workspace/pipeline.py
-
-# Set permissions
-RUN chown -R appuser:appuser /workspace && \
-    mkdir -p /home/appuser/.local && \
-    chown -R appuser:appuser /home/appuser
-
-# Switch to non-root user
-USER appuser
-
-# Set Python path to include user site-packages
-ENV PYTHONPATH=/home/appuser/.local/lib/python3.9/site-packages:$PYTHONPATH
-
-# Use the launcher that comes with the Apache Beam SDK image
-ENTRYPOINT ["python", "/workspace/pipeline.py"]
-
-error I am getting in dataflow:
-docker: Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: exec: "/opt/google/dataflow/python_template_launcher": stat /opt/google/dataflow/python_template_launcher: no such file or directory: unknown.
+gcloud builds submit --tag us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 /workspace
+gcloud dataflow flex-template build gs://vznet-test/wireline_churn_test/src/template.json --image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 --sdk-language "PYTHON" --metadata-file metadata.json
+gcloud dataflow flex-template run bigquery123 --template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json --project vz-it-np-gudv-dev-vzntdo-0 --region us-east4 --parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10" --temp-location gs://vznet-test/wireline_churn_test/tmp/ --num-workers 2 --max-workers 2 --worker-machine-type n2-standard-2 --disable-public-ips --network=shared-np-east --dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv --subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 --service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com
