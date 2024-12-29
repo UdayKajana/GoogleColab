@@ -3,50 +3,143 @@ from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.options.pipeline_options import StandardOptions
 from apache_beam.options.pipeline_options import GoogleCloudOptions
 from apache_beam.io.gcp.bigquery import ReadFromBigQuery
+import argparse
 
-def run():
-    # Define pipeline options
-    pipeline_options = PipelineOptions()
-
-    # Validate Google Cloud options
-    google_cloud_options = pipeline_options.view_as(GoogleCloudOptions)
-    if not google_cloud_options.project:
-        raise ValueError("Project must be specified.")
-    if not google_cloud_options.temp_location:
-        raise ValueError("Temporary GCS location must be specified.")
-    if not google_cloud_options.staging_location:
-        raise ValueError("Staging GCS location must be specified.")
-
-    # Set runner (DataflowRunner for cloud execution)
-    pipeline_options.view_as(StandardOptions).runner = 'DataflowRunner'
-
-    # Debug logs for verification
-    print(f"Project: {google_cloud_options.project}")
-    print(f"Region: {google_cloud_options.region}")
-    print(f"Temp Location: {google_cloud_options.temp_location}")
-    print(f"Staging Location: {google_cloud_options.staging_location}")
-
-    # Create pipeline
-    with beam.Pipeline(options=pipeline_options) as pipeline:
-        # Read query from pipeline options
-        query = pipeline_options.view_as(GoogleCloudOptions).query
-        if not query:
-            raise ValueError("Query must be specified.")
-
-        # Read from BigQuery using the provided query
-        records = pipeline | 'ReadFromBigQuery' >> ReadFromBigQuery(
-            query=query
-            use_standard_sql=True,
-            gcs_location=google_cloud_options.temp_location
+class CustomPipelineOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        # Add custom arguments
+        parser.add_argument(
+            '--query',
+            required=True,
+            help='BigQuery SQL query to execute'
+        )
+        parser.add_argument(
+            '--project',
+            required=True,
+            help='GCP project ID'
+        )
+        parser.add_argument(
+            '--region',
+            required=True,
+            help='GCP region for Dataflow job'
+        )
+        parser.add_argument(
+            '--temp_location',
+            required=True,
+            help='GCS temporary location'
+        )
+        parser.add_argument(
+            '--staging_location',
+            required=True,
+            help='GCS staging location'
+        )
+        parser.add_argument(
+            '--network',
+            required=True,
+            help='Network for Dataflow workers'
+        )
+        parser.add_argument(
+            '--subnetwork',
+            required=True,
+            help='Subnetwork for Dataflow workers'
+        )
+        parser.add_argument(
+            '--service_account_email',
+            required=True,
+            help='Service account email for Dataflow workers'
+        )
+        parser.add_argument(
+            '--dataflow_kms_key',
+            required=True,
+            help='KMS key for Dataflow job'
+        )
+        parser.add_argument(
+            '--num_workers',
+            type=int,
+            default=2,
+            help='Number of workers'
+        )
+        parser.add_argument(
+            '--max_workers',
+            type=int,
+            default=2,
+            help='Maximum number of workers'
+        )
+        parser.add_argument(
+            '--worker_machine_type',
+            default='n2-standard-2',
+            help='Worker machine type'
         )
 
-        # Add your transformations here (example placeholder)
-        transformed_records = records | 'ExampleTransform' >> beam.Map(lambda record: record)
+def validate_options(options):
+    """Validate pipeline options."""
+    required_options = [
+        'project', 'region', 'temp_location', 'staging_location',
+        'network', 'subnetwork', 'service_account_email', 'query'
+    ]
+    
+    missing_options = [opt for opt in required_options if not getattr(options, opt, None)]
+    if missing_options:
+        raise ValueError(f"Missing required options: {', '.join(missing_options)}")
 
-        # Write transformed records or add further processing if needed
+def run_pipeline(options):
+    """Execute the pipeline with the provided options."""
+    # Validate options
+    validate_options(options)
+    
+    # Set up pipeline options
+    options.view_as(StandardOptions).runner = 'DataflowRunner'
+    
+    # Configure Google Cloud options
+    google_cloud_options = options.view_as(GoogleCloudOptions)
+    google_cloud_options.project = options.project
+    google_cloud_options.region = options.region
+    google_cloud_options.temp_location = options.temp_location
+    google_cloud_options.staging_location = options.staging_location
+    google_cloud_options.service_account_email = options.service_account_email
+    google_cloud_options.network = options.network
+    google_cloud_options.subnetwork = options.subnetwork
+    
+    # Debug logs
+    print("Pipeline Configuration:")
+    print(f"Project: {options.project}")
+    print(f"Region: {options.region}")
+    print(f"Temp Location: {options.temp_location}")
+    print(f"Staging Location: {options.staging_location}")
+    print(f"Network: {options.network}")
+    print(f"Subnetwork: {options.subnetwork}")
+    print(f"Service Account: {options.service_account_email}")
+    print(f"Query: {options.query}")
+    
+    # Create and run pipeline
+    pipeline = beam.Pipeline(options=options)
+    
+    # Read from BigQuery
+    records = pipeline | 'ReadFromBigQuery' >> ReadFromBigQuery(
+        query=options.query,
+        use_standard_sql=True,
+        gcs_location=options.temp_location
+    )
+    
+    # Add your transformations here
+    transformed_records = records | 'ExampleTransform' >> beam.Map(lambda record: record)
+    
+    # Write transformed records or add further processing if needed
+    
+    # Run the pipeline
+    result = pipeline.run()
+    result.wait_until_finish()
+
+def main():
+    """Main entry point."""
+    pipeline_options = CustomPipelineOptions()
+    run_pipeline(pipeline_options)
 
 if __name__ == '__main__':
-    run()
+    main()
+
+
 
 {
     "name": "Bigquery to GCS Pipeline",
@@ -59,6 +152,55 @@ if __name__ == '__main__':
             "isOptional": false,
             "regexes": [],
             "paramType": "TEXT"
+        },
+        {
+            "name": "project",
+            "label": "GCP Project ID",
+            "helpText": "The GCP project ID where the job will run",
+            "isOptional": false,
+            "paramType": "TEXT"
+        },
+        {
+            "name": "region",
+            "label": "Region",
+            "helpText": "The GCP region for the Dataflow job",
+            "isOptional": false,
+            "paramType": "TEXT"
+        },
+        {
+            "name": "temp_location",
+            "label": "Temporary Location",
+            "helpText": "GCS location for temporary files",
+            "isOptional": false,
+            "paramType": "TEXT"
+        },
+        {
+            "name": "staging_location",
+            "label": "Staging Location",
+            "helpText": "GCS location for staging files",
+            "isOptional": false,
+            "paramType": "TEXT"
+        },
+        {
+            "name": "network",
+            "label": "Network",
+            "helpText": "Network for Dataflow workers",
+            "isOptional": false,
+            "paramType": "TEXT"
+        },
+        {
+            "name": "subnetwork",
+            "label": "Subnetwork",
+            "helpText": "Subnetwork for Dataflow workers",
+            "isOptional": false,
+            "paramType": "TEXT"
+        },
+        {
+            "name": "service_account_email",
+            "label": "Service Account Email",
+            "helpText": "Service account email for Dataflow workers",
+            "isOptional": false,
+            "paramType": "TEXT"
         }
     ],
     "defaultEnvironment": {
@@ -70,6 +212,35 @@ if __name__ == '__main__':
     }
 }
 
-gcloud builds submit --tag us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 /workspace
-gcloud dataflow flex-template build gs://vznet-test/wireline_churn_test/src/template.json --image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 --sdk-language "PYTHON" --metadata-file metadata.json
-gcloud dataflow flex-template run bigquery123 --template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json --project vz-it-np-gudv-dev-vzntdo-0 --region us-east4 --parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10" --temp-location gs://vznet-test/wireline_churn_test/tmp/ --num-workers 2 --max-workers 2 --worker-machine-type n2-standard-2 --disable-public-ips --network=shared-np-east --dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv --subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 --service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com
+
+
+
+# Build the Docker image
+gcloud builds submit --tag us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 .
+
+# Build the Flex Template
+gcloud dataflow flex-template build gs://vznet-test/wireline_churn_test/src/template.json \
+    --image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 \
+    --sdk-language "PYTHON" \
+    --metadata-file metadata.json
+
+# Run the Flex Template
+gcloud dataflow flex-template run bigquery-pipeline \
+    --template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
+    --project vz-it-np-gudv-dev-vzntdo-0 \
+    --region us-east4 \
+    --parameters \
+        query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10" \
+        project=vz-it-np-gudv-dev-vzntdo-0 \
+        region=us-east4 \
+        temp_location=gs://vznet-test/wireline_churn_test/tmp/ \
+        staging_location=gs://vznet-test/wireline_churn_test/staging/ \
+        network=shared-np-east \
+        subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
+        service_account_email=sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com \
+    --temp-location gs://vznet-test/wireline_churn_test/tmp/ \
+    --num-workers 2 \
+    --max-workers 2 \
+    --worker-machine-type n2-standard-2 \
+    --disable-public-ips \
+    --dataflow-kms-key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv
