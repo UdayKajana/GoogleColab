@@ -1,47 +1,68 @@
-import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.io.gcp.pubsub import ReadFromPubSub
-from apache_beam.options.pipeline_options import StandardOptions
 
-import argparse
-import logging
-logging.getLogger().setLevel(logging.ERROR)
-class TemplateOptions(PipelineOptions):
-    @classmethod
-    def _add_argparse_args(cls, parser):
-        parser.add_value_provider_argument('--params', type=str)
-parser = argparse.ArgumentParser()
-parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
-parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
-parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
-parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
-parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
-parser.add_argument('--template_location', dest='template_location', required=True,help='GCS bucket path to save template')
-# parser.add_argument('--input_project', dest='input_project', required=True, help='Input Subscription')
-# parser.add_argument('--input_dataset', dest='input_dataset', required=True, help='Input Subscription')
-# parser.add_argument('--input_table', dest='input_table', required=True, help='Input Subscription')
-parser.add_argument('--query', dest='query', required=True, help='Input Subscription')
-parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Input Subscription')
-known_args,beam_args = parser.parse_known_args()
-
-options = {
-    'project': known_args.project,
-    'runner': known_args.runner,
-    'region': known_args.region,
-    'staging_location': known_args.staging_location,
-    'temp_location': known_args.temp_location,
-    'template_location': known_args.template_location
-}
-pipeline_options = PipelineOptions.from_dictionary(options)
-p = beam.Pipeline(options=pipeline_options)
-data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(query=known_args.query, use_standard_sql=True)
-csv_data = data | 'ConvertToCSV' >> beam.Map(lambda row: ','.join(str(x) for x in row.values()))
-print_data = csv_data | "PrintData" >> beam.Map(lambda element : logging.log(logging.INFO, str(element)))
-csv_data | 'WriteToGCS' >> beam.io.WriteToText(f'{known_args.gcs_folder_path}/output.csv', file_name_suffix='.csv', header="ont_activation_date, data_circuit_id, circuit_id, video_circuit_id, service_type, address_id, vision_account_id, vision_customer_id, address_type, line_of_business")
-# Spanner configuration.
-# data | "WriteToSpanner" >> beam.io.WriteToSpanner(
-#     instance_id=known_args.spanner_instance_id,
-#     database_id=known_args.spanner_database_id,
-#     table_id=known_args.spanner_table_id,
-# )
-p.run()
+{"severity":"INFO","time":"2024/12/30 03:54:01.794358","line":"python_template_launcher.go:40","message":"Started template launcher."}
+{"severity":"INFO","time":"2024/12/30 03:54:01.816322","line":"python_template_launcher.go:44","message":"Initialize Python template."}
+{"severity":"INFO","time":"2024/12/30 03:54:01.816348","line":"python_template.go:98","message":"Falling back to using template-container args from metadata: template-container-args"}
+{"severity":"INFO","time":"2024/12/30 03:54:01.819959","line":"python_template.go:108","message":"Validating template-container-args: {\"additionalBoolParameters\":[\"no_use_public_ips\"],\"consoleLogsLocation\":\"gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-29_19_51_59-7781175019910594027/console_logs\",\"environment\":{\"network\":\"shared-np-east\",\"region\":\"us-east4\",\"serviceAccountEmail\":\"sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com\",\"stagingLocation\":\"gs://dataflow-staging-us-east4-206482042907/staging\",\"subnetwork\":\"https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2\",\"tempLocation\":\"gs://vznet-test/wireline_churn_test/tmp/\"},\"jobId\":\"2024-12-29_19_51_59-7781175019910594027\",\"jobName\":\"bigquery-pipeline-t\",\"jobObjectLocation\":\"gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-29_19_51_59-7781175019910594027/job_object\",\"operationResultLocation\":\"gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-29_19_51_59-7781175019910594027/operation_result\",\"parameters\":{\"dataflow_kms_key\":\"projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv\",\"machine_type\":\"n2-standard-2\",\"max_num_workers\":\"2\",\"network\":\"shared-np-east\",\"num_workers\":\"2\",\"query\":\"SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10\",\"service_account_email\":\"sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com\",\"staging_location\":\"gs://dataflow-staging-us-east4-206482042907/staging\",\"subnetwork\":\"https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2\",\"temp_location\":\"gs://vznet-test/wireline_churn_test/tmp/\"},\"projectId\":\"vz-it-np-gudv-dev-vzntdo-0\"}"}
+{"severity":"INFO","time":"2024/12/30 03:54:01.821316","line":"python_template.go:117","message":"Extracting operation result location."}
+{"severity":"INFO","time":"2024/12/30 03:54:01.821355","line":"python_template.go:125","message":"Operation result location: gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-29_19_51_59-7781175019910594027/operation_result"}
+{"severity":"INFO","time":"2024/12/30 03:54:01.821376","line":"python_template.go:128","message":"Extracting console log location."}
+{"severity":"INFO","time":"2024/12/30 03:54:01.821413","line":"python_template.go:136","message":"Console logs location: gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-29_19_51_59-7781175019910594027/console_logs"}
+{"severity":"INFO","time":"2024/12/30 03:54:01.821438","line":"python_template.go:139","message":"Extracting Python command specs."}
+{"severity":"INFO","time":"2024/12/30 03:54:01.821975","line":"python_template.go:148","message":"Generating launch args."}
+{"severity":"INFO","time":"2024/12/30 03:54:01.822238","line":"python_args.go:236","message":"Overriding network with value: shared-np-east (previous value: shared-np-east)"}
+{"severity":"INFO","time":"2024/12/30 03:54:01.822291","line":"python_args.go:236","message":"Overriding temp_location with value: gs://vznet-test/wireline_churn_test/tmp/ (previous value: gs://vznet-test/wireline_churn_test/tmp/)"}
+{"severity":"INFO","time":"2024/12/30 03:54:01.822325","line":"python_args.go:236","message":"Overriding service_account_email with value: sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com (previous value: sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com)"}
+{"severity":"INFO","time":"2024/12/30 03:54:01.822369","line":"python_args.go:236","message":"Overriding staging_location with value: gs://dataflow-staging-us-east4-206482042907/staging (previous value: gs://dataflow-staging-us-east4-206482042907/staging)"}
+{"severity":"INFO","time":"2024/12/30 03:54:01.822388","line":"python_args.go:236","message":"Overriding subnetwork with value: https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 (previous value: https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2)"}
+{"severity":"INFO","time":"2024/12/30 03:54:01.822468","line":"launch.go:50","message":"Validating ExpectedFeatures."}
+{"severity":"INFO","time":"2024/12/30 03:54:01.822494","line":"launch.go:75","message":"Launching Python template."}
+{"severity":"INFO","time":"2024/12/30 03:54:01.822544","line":"python_template.go:64","message":"Using launch args: [/template/pipeline.py --requirements_file=/template/requirements.txt --runner=DataflowRunner --job_name=bigquery-pipeline-t --subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 --dataflow_kms_key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv --network=shared-np-east --region=us-east4 --temp_location=gs://vznet-test/wireline_churn_test/tmp/ --staging_location=gs://dataflow-staging-us-east4-206482042907/staging --query=SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10 --machine_type=n2-standard-2 --project=vz-it-np-gudv-dev-vzntdo-0 --template_location=gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-29_19_51_59-7781175019910594027/job_object --service_account_email=sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com --num_workers=2 --max_num_workers=2 --no_use_public_ips]"}
+{"severity":"INFO","time":"2024/12/30 03:54:01.822617","line":"exec.go:38","message":"Executing: python /template/pipeline.py --requirements_file=/template/requirements.txt --runner=DataflowRunner --job_name=bigquery-pipeline-t --subnetwork=https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 --dataflow_kms_key=projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv --network=shared-np-east --region=us-east4 --temp_location=gs://vznet-test/wireline_churn_test/tmp/ --staging_location=gs://dataflow-staging-us-east4-206482042907/staging --query=SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10 --machine_type=n2-standard-2 --project=vz-it-np-gudv-dev-vzntdo-0 --template_location=gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-29_19_51_59-7781175019910594027/job_object --service_account_email=sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com --num_workers=2 --max_num_workers=2 --no_use_public_ips"}
+{"severity":"INFO","time":"2024/12/30 03:54:04.824969","line":"exec.go:66","message":"INFO:root:Starting pipeline with project: vz-it-np-gudv-dev-vzntdo-0"}
+{"severity":"INFO","time":"2024/12/30 03:54:04.825200","line":"exec.go:66","message":"INFO:root:Query: SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10"}
+{"severity":"INFO","time":"2024/12/30 03:54:05.092677","line":"exec.go:66","message":"WARNING:apache_beam.transforms.core:('No iterator is returned by the process method in %s.', \u003cclass 'apache_beam.io.gcp.bigquery_read_internal._PassThroughThenCleanup.expand.\u003clocals\u003e.RemoveExtractedFiles'\u003e)"}
+{"severity":"INFO","time":"2024/12/30 03:54:05.404707","line":"exec.go:66","message":"WARNING:apache_beam.transforms.core:('No iterator is returned by the process method in %s.', \u003cclass 'apache_beam.io.gcp.bigquery_read_internal.RemoveExtractedFiles'\u003e)"}
+{"severity":"INFO","time":"2024/12/30 03:54:05.436775","line":"exec.go:66","message":"INFO:apache_beam.runners.portability.stager:Executing command: ['/usr/local/bin/python', '-m', 'pip', 'download', '--dest', '/tmp/dataflow-requirements-cache', '-r', '/tmp/tmp9wbt9j5k/tmp_requirements.txt', '--exists-action', 'i', '--no-deps', '--implementation', 'cp', '--abi', 'cp39', '--platform', 'manylinux2014_x86_64']"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.184472","line":"exec.go:66","message":"Traceback (most recent call last):"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.184674","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/site-packages/apache_beam/utils/processes.py\", line 89, in check_output"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.184960","line":"exec.go:66","message":"    out = subprocess.check_output(*args, **kwargs)"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.185022","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/subprocess.py\", line 424, in check_output"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.185262","line":"exec.go:66","message":"    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True,"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.185316","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/subprocess.py\", line 528, in run"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.185562","line":"exec.go:66","message":"    raise CalledProcessError(retcode, process.args,"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.185658","line":"exec.go:66","message":"subprocess.CalledProcessError: Command '['/usr/local/bin/python', '-m', 'pip', 'download', '--dest', '/tmp/dataflow-requirements-cache', '-r', '/tmp/tmp9wbt9j5k/tmp_requirements.txt', '--exists-action', 'i', '--no-deps', '--implementation', 'cp', '--abi', 'cp39', '--platform', 'manylinux2014_x86_64']' returned non-zero exit status 1."}
+{"severity":"INFO","time":"2024/12/30 04:00:14.185728","line":"exec.go:66","message":"During handling of the above exception, another exception occurred:"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.185770","line":"exec.go:66","message":"Traceback (most recent call last):"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.185805","line":"exec.go:66","message":"  File \"/template/pipeline.py\", line 55, in \u003cmodule\u003e"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.185991","line":"exec.go:66","message":"    run()"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.186045","line":"exec.go:66","message":"  File \"/template/pipeline.py\", line 51, in run"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.186168","line":"exec.go:66","message":"    result = pipeline.run()"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.186219","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/site-packages/apache_beam/pipeline.py\", line 567, in run"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.186478","line":"exec.go:66","message":"    return Pipeline.from_runner_api("}
+{"severity":"INFO","time":"2024/12/30 04:00:14.186527","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/site-packages/apache_beam/pipeline.py\", line 594, in run"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.186800","line":"exec.go:66","message":"    return self.runner.run_pipeline(self, self._options)"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.186884","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/site-packages/apache_beam/runners/dataflow/dataflow_runner.py\", line 395, in run_pipeline"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.187119","line":"exec.go:66","message":"    artifacts = environments.python_sdk_dependencies(options)"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.187179","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/site-packages/apache_beam/transforms/environments.py\", line 906, in python_sdk_dependencies"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.187509","line":"exec.go:66","message":"    return stager.Stager.create_job_resources("}
+{"severity":"INFO","time":"2024/12/30 04:00:14.187576","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/site-packages/apache_beam/runners/portability/stager.py\", line 246, in create_job_resources"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.187809","line":"exec.go:66","message":"    ("}
+{"severity":"INFO","time":"2024/12/30 04:00:14.187882","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/site-packages/apache_beam/utils/retry.py\", line 298, in wrapper"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188077","line":"exec.go:66","message":"    return fun(*args, **kwargs)"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188127","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/site-packages/apache_beam/runners/portability/stager.py\", line 776, in _populate_requirements_cache"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188444","line":"exec.go:66","message":"    processes.check_output(cmd_args, stderr=processes.STDOUT)"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188496","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/site-packages/apache_beam/utils/processes.py\", line 94, in check_output"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188637","line":"exec.go:66","message":"    raise RuntimeError( \\"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188702","line":"exec.go:66","message":"RuntimeError: Full traceback: Traceback (most recent call last):"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188721","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/site-packages/apache_beam/utils/processes.py\", line 89, in check_output"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188734","line":"exec.go:66","message":"    out = subprocess.check_output(*args, **kwargs)"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188764","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/subprocess.py\", line 424, in check_output"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188780","line":"exec.go:66","message":"    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True,"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188792","line":"exec.go:66","message":"  File \"/usr/local/lib/python3.9/subprocess.py\", line 528, in run"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188804","line":"exec.go:66","message":"    raise CalledProcessError(retcode, process.args,"}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188815","line":"exec.go:66","message":"subprocess.CalledProcessError: Command '['/usr/local/bin/python', '-m', 'pip', 'download', '--dest', '/tmp/dataflow-requirements-cache', '-r', '/tmp/tmp9wbt9j5k/tmp_requirements.txt', '--exists-action', 'i', '--no-deps', '--implementation', 'cp', '--abi', 'cp39', '--platform', 'manylinux2014_x86_64']' returned non-zero exit status 1."}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188864","line":"exec.go:66","message":" "}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188875","line":"exec.go:66","message":" Pip install failed for package: -r           "}
+{"severity":"INFO","time":"2024/12/30 04:00:14.188887","line":"exec.go:66","message":" Output from execution of subprocess: b\"WARNING: Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('\u003cpip._vendor.urllib3.connection.HTTPSConnection object at 0x780a47a3c3a0\u003e: Failed to establish a new connection: [Errno 101] Network is unreachable')': /simple/avro-python3/\\nWARNING: Retrying (Retry(total=3, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('\u003cpip._vendor.urllib3.connection.HTTPSConnection object at 0x780a47a3c6d0\u003e: Failed to establish a new connection: [Errno 101] Network is unreachable')': /simple/avro-python3/\\nWARNING: Retrying (Retry(total=2, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('\u003cpip._vendor.urllib3.connection.HTTPSConnection object at 0x780a47a3c940\u003e: Failed to establish a new connection: [Errno 101] Network is unreachable')': /simple/avro-python3/\\nWARNING: Retrying (Retry(total=1, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('\u003cpip._vendor.urllib3.connection.HTTPSConnection object at 0x780a47a3caf0\u003e: Failed to establish a new connection: [Errno 101] Network is unreachable')': /simple/avro-python3/\\nWARNING: Retrying (Retry(total=0, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('\u003cpip._vendor.urllib3.connection.HTTPSConnection object at 0x780a47a3cca0\u003e: Failed to establish a new connection: [Errno 101] Network is unreachable')': /simple/avro-python3/\\nERROR: Could not find a version that satisfies the requirement avro-python3 (from versions: none)\\nERROR: No matching distribution found for avro-python3\\n\""}
+{"severity":"INFO","time":"2024/12/30 04:00:14.653493","line":"exec.go:52","message":"python failed with exit status 1"}
+{"severity":"ERROR","time":"2024/12/30 04:00:14.653581","line":"launch.go:80","message":"Error: Template launch failed: exit status 1"}
