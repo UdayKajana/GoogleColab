@@ -1,0 +1,115 @@
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.pipeline_options import StandardOptions
+import argparse
+import logging
+
+logging.getLogger().setLevel(logging.ERROR)
+
+class TemplateOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        # Required parameters
+        parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
+        parser.add_argument('--query', dest='query', required=True, help='BigQuery SQL query')
+        parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Output GCS folder path')
+        
+        # Network configuration
+        parser.add_argument('--network', dest='network', required=True, help='VPC network')
+        parser.add_argument('--subnetwork', dest='subnetwork', required=True, help='VPC subnetwork')
+        
+        # Optional parameters with defaults
+        parser.add_argument('--region', dest='region', default='us-east4', help='GCP project region')
+        parser.add_argument('--service_account_email', dest='service_account_email', required=True, 
+                          help='Service account email')
+        parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
+        parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
+
+def run(argv=None):
+    parser = argparse.ArgumentParser()
+    known_args, pipeline_args = parser.parse_known_args(argv)
+    
+    pipeline_options = TemplateOptions(pipeline_args)
+    pipeline_options.view_as(StandardOptions).runner = 'DataflowRunner'
+    
+    with beam.Pipeline(options=pipeline_options) as p:
+        # Reading from BigQuery
+        data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
+            query=pipeline_options.query,
+            use_standard_sql=True
+        )
+        
+        # Converting to CSV format
+        csv_data = data | 'ConvertToCSV' >> beam.Map(
+            lambda row: ','.join(str(x) for x in row.values())
+        )
+        
+        # Writing to GCS
+        csv_data | 'WriteToGCS' >> beam.io.WriteToText(
+            f'{pipeline_options.gcs_folder_path}/output.csv',
+            file_name_suffix='.csv',
+            header="ont_activation_date,data_circuit_id,circuit_id,video_circuit_id,service_type,address_id,vision_account_id,vision_customer_id,address_type,line_of_business"
+        )
+
+if __name__ == '__main__':
+    run()
+
+
+    {
+    "name": "BigQuery to GCS Pipeline",
+    "description": "A pipeline that reads from BigQuery and writes to GCS",
+    "parameters": [
+        {
+            "name": "query",
+            "label": "BigQuery SQL query",
+            "helpText": "SQL query to execute",
+            "paramType": "TEXT",
+            "isOptional": false
+        },
+        {
+            "name": "gcs_folder_path",
+            "label": "Output GCS folder path",
+            "helpText": "GCS location to write output files",
+            "paramType": "TEXT",
+            "isOptional": false
+        },
+        {
+            "name": "network",
+            "label": "VPC Network",
+            "helpText": "The VPC network to use",
+            "paramType": "TEXT",
+            "isOptional": false
+        },
+        {
+            "name": "subnetwork",
+            "label": "VPC Subnetwork",
+            "helpText": "The VPC subnetwork to use",
+            "paramType": "TEXT",
+            "isOptional": false
+        },
+        {
+            "name": "service_account_email",
+            "label": "Service Account Email",
+            "helpText": "Service account email to run the job",
+            "paramType": "TEXT",
+            "isOptional": false
+        }
+    ]
+}
+
+
+gcloud dataflow flex-template run "bigquery-pipeline-$(date +%Y%m%d-%H%M%S)" \
+    --template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
+    --project vz-it-np-gudv-dev-vzntdo-0 \
+    --region us-east4 \
+    --parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10" \
+    --parameters gcs_folder_path="gs://vznet-test/wireline_churn_test/tmp/" \
+    --parameters network="shared-np-east" \
+    --parameters subnetwork="https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2" \
+    --parameters service_account_email="sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com" \
+    --num-workers 2 \
+    --max-workers 2 \
+    --worker-machine-type n2-standard-2 \
+    --disable-public-ips \
+    --temp-location gs://vznet-test/wireline_churn_test/tmp/ \
+    --dataflow-kms-key projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv
