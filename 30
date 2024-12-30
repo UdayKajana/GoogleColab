@@ -1,51 +1,78 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.io.gcp.pubsub import ReadFromPubSub
 from apache_beam.options.pipeline_options import StandardOptions
+
 import argparse
 import logging
-
 logging.getLogger().setLevel(logging.ERROR)
+class TemplateOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_value_provider_argument('--params', type=str)
+parser = argparse.ArgumentParser()
+parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
+parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
+parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
+parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
+parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
+parser.add_argument('--template_location', dest='template_location', required=True,help='GCS bucket path to save template')
+# parser.add_argument('--input_project', dest='input_project', required=True, help='Input Subscription')
+# parser.add_argument('--input_dataset', dest='input_dataset', required=True, help='Input Subscription')
+# parser.add_argument('--input_table', dest='input_table', required=True, help='Input Subscription')
+parser.add_argument('--query', dest='query', required=True, help='Input Subscription')
+parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Input Subscription')
+known_args,beam_args = parser.parse_known_args()
 
-def run(argv=None):
-    """Main entry point; defines and runs the pipeline."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
-    parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
-    parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
-    parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
-    parser.add_argument('--query', dest='query', required=True, help='BigQuery SQL query')
-    parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Output GCS folder path')
-    
-    known_args, pipeline_args = parser.parse_known_args(argv)
-    
-    options = {
-        'project': known_args.project,
-        'region': known_args.region,
-        'staging_location': known_args.staging_location,
-        'temp_location': known_args.temp_location,
-    }
-    
-    pipeline_options = PipelineOptions.from_dictionary(options)
-    
-    with beam.Pipeline(options=pipeline_options) as p:
-        data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
-            query=known_args.query, 
-            use_standard_sql=True
-        )
-        
-        csv_data = data | 'ConvertToCSV' >> beam.Map(
-            lambda row: ','.join(str(x) for x in row.values())
-        )
-        
-        _ = csv_data | "PrintData" >> beam.Map(
-            lambda element: logging.log(logging.INFO, str(element))
-        )
-        
-        _ = csv_data | 'WriteToGCS' >> beam.io.WriteToText(
-            f'{known_args.gcs_folder_path}/output.csv',
-            file_name_suffix='.csv',
-            header="ont_activation_date,data_circuit_id,circuit_id,video_circuit_id,service_type,address_id,vision_account_id,vision_customer_id,address_type,line_of_business"
-        )
+options = {
+    'project': known_args.project,
+    'runner': known_args.runner,
+    'region': known_args.region,
+    'staging_location': known_args.staging_location,
+    'temp_location': known_args.temp_location,
+    'template_location': known_args.template_location
+}
+pipeline_options = PipelineOptions.from_dictionary(options)
+p = beam.Pipeline(options=pipeline_options)
+data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(query=known_args.query, use_standard_sql=True)
+csv_data = data | 'ConvertToCSV' >> beam.Map(lambda row: ','.join(str(x) for x in row.values()))
+print_data = csv_data | "PrintData" >> beam.Map(lambda element : logging.log(logging.INFO, str(element)))
+csv_data | 'WriteToGCS' >> beam.io.WriteToText(f'{known_args.gcs_folder_path}/output.csv', file_name_suffix='.csv', header="ont_activation_date, data_circuit_id, circuit_id, video_circuit_id, service_type, address_id, vision_account_id, vision_customer_id, address_type, line_of_business")
+# Spanner configuration.
+# data | "WriteToSpanner" >> beam.io.WriteToSpanner(
+#     instance_id=known_args.spanner_instance_id,
+#     database_id=known_args.spanner_database_id,
+#     table_id=known_args.spanner_table_id,
+# )
+p.run()
 
-if __name__ == '__main__':
-    run()
+
+# Build the Docker image (unchanged)
+gcloud builds submit --tag us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 .
+
+# Build the Flex Template (unchanged)
+gcloud dataflow flex-template build gs://vznet-test/wireline_churn_test/src/template.json \
+    --image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 \
+    --sdk-language "PYTHON" \
+    --metadata-file metadata.json
+
+# Run the Flex Template (corrected)
+gcloud dataflow flex-template run bigquery-pipeline-tt \
+    --template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
+    --project vz-it-np-gudv-dev-vzntdo-0 \
+    --region us-east4 \
+    --parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10" \
+    --parameters gcs_folder_path=gs://vznet-test/wireline_churn_test/tmp/ \
+    --num-workers 2 \
+    --max-workers 2 \
+    --worker-machine-type n2-standard-2 \
+    --disable-public-ips \
+    --network shared-np-east \
+    --subnetwork https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
+    --temp-location gs://vznet-test/wireline_churn_test/tmp/ \
+    --dataflow-kms-key projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
+    --parameters service_account_email=sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com \
+    --service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com
+
+
+in this conde and commands, remove image part for now, I just want to pass the query and it has to execute that
