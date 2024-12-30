@@ -1,62 +1,47 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.io.gcp.bigquery import ReadFromBigQuery
-import logging
+from apache_beam.io.gcp.pubsub import ReadFromPubSub
+from apache_beam.options.pipeline_options import StandardOptions
 
-class CustomOptions(PipelineOptions):
+import argparse
+import logging
+logging.getLogger().setLevel(logging.ERROR)
+class TemplateOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
-        parser.add_argument('--query', required=True, help='BigQuery SQL query to execute')
+        parser.add_value_provider_argument('--params', type=str)
+parser = argparse.ArgumentParser()
+parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
+parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
+parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
+parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
+parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
+parser.add_argument('--template_location', dest='template_location', required=True,help='GCS bucket path to save template')
+# parser.add_argument('--input_project', dest='input_project', required=True, help='Input Subscription')
+# parser.add_argument('--input_dataset', dest='input_dataset', required=True, help='Input Subscription')
+# parser.add_argument('--input_table', dest='input_table', required=True, help='Input Subscription')
+parser.add_argument('--query', dest='query', required=True, help='Input Subscription')
+parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Input Subscription')
+known_args,beam_args = parser.parse_known_args()
 
-def run():
-    """Main entry point."""
-    logging.getLogger().setLevel(logging.INFO)
-
-    pipeline_options = PipelineOptions()
-    custom_options = pipeline_options.view_as(CustomOptions)
-
-    # Logging the project and query
-    logging.info(f"Starting pipeline with query: {custom_options.query}")
-
-    # Create the pipeline
-    with beam.Pipeline(options=pipeline_options) as pipeline:
-        records = (
-            pipeline 
-            | 'ReadFromBigQuery' >> ReadFromBigQuery(
-                query=custom_options.query,
-                use_standard_sql=True)
-        )
-
-        transformed_records = records | 'ExampleTransform' >> beam.Map(lambda record: record)
-
-if __name__ == '__main__':
-    run()
-
-python pipeline.py --query="SELECT * FROM `your_project_id.dataset.table` LIMIT 10"
-
-   FROM gcr.io/dataflow-templates-base/python39-template-launcher-base
-   WORKDIR /template
-
-   COPY requirements.txt /template/requirements.txt
-   COPY pipeline.py /template/pipeline.py
-
-   RUN pip install --upgrade pip && \
-       pip install --no-cache-dir -r /template/requirements.txt
-
-   ENV FLEX_TEMPLATE_PYTHON_PY_FILE="/template/pipeline.py"
-   ENV FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE="/template/requirements.txt"
-   ENV FLEX_TEMPLATE_PYTHON_OPTIONS="--runner=DataflowRunner --project=your_project_id --region=us-east4"
-
-   
-   gcloud builds submit --tag us-east4-docker.pkg.dev/your_project_id/vznet/pipeline_env:V2 .
-   
-   gcloud dataflow flex-template build gs://your_bucket/path/template.json \
-   --image us-east4-docker.pkg.dev/your_project_id/vznet/pipeline_env:V2 \
-   --sdk-language "PYTHON" \
-   --metadata-file metadata.json
-   
-   gcloud dataflow flex-template run your-job-name \
-   --template-file-gcs-location gs://your_bucket/path/template.json \
-   --project your_project_id \
-   --parameters query="SELECT * FROM `your_project_id.dataset.table` LIMIT 10"
-   
+options = {
+    'project': known_args.project,
+    'runner': known_args.runner,
+    'region': known_args.region,
+    'staging_location': known_args.staging_location,
+    'temp_location': known_args.temp_location,
+    'template_location': known_args.template_location
+}
+pipeline_options = PipelineOptions.from_dictionary(options)
+p = beam.Pipeline(options=pipeline_options)
+data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(query=known_args.query, use_standard_sql=True)
+csv_data = data | 'ConvertToCSV' >> beam.Map(lambda row: ','.join(str(x) for x in row.values()))
+print_data = csv_data | "PrintData" >> beam.Map(lambda element : logging.log(logging.INFO, str(element)))
+csv_data | 'WriteToGCS' >> beam.io.WriteToText(f'{known_args.gcs_folder_path}/output.csv', file_name_suffix='.csv', header="ont_activation_date, data_circuit_id, circuit_id, video_circuit_id, service_type, address_id, vision_account_id, vision_customer_id, address_type, line_of_business")
+# Spanner configuration.
+# data | "WriteToSpanner" >> beam.io.WriteToSpanner(
+#     instance_id=known_args.spanner_instance_id,
+#     database_id=known_args.spanner_database_id,
+#     table_id=known_args.spanner_table_id,
+# )
+p.run()
