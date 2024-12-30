@@ -59,3 +59,44 @@ gcloud dataflow flex-template run "bigquery-to-gcs-job-$(date +%Y%m%d-%H%M%S)" \
     --num-workers 2 \
     --max-workers 2 \
     --worker-machine-type n2-standard-2
+
+
+{
+    "name": "BigQuery to GCS Pipeline",
+    "description": "A pipeline that reads from BigQuery and writes to GCS",
+    "parameters": [
+        {
+            "name": "query",
+            "label": "BigQuery SQL query",
+            "helpText": "SQL query to execute",
+            "paramType": "TEXT",
+            "isOptional": false
+        },
+        {
+            "name": "gcs_folder_path",
+            "label": "Output GCS folder path",
+            "helpText": "GCS location to write output files",
+            "paramType": "TEXT",
+            "isOptional": false
+        }
+    ],
+    "defaultEnvironment": {
+        "tempLocation": "gs://vznet-test/wireline_churn_test/temp",
+        "stagingLocation": "gs://vznet-test/wireline_churn_test/staging",
+        "zone": "us-east4-a",
+        "numWorkers": 2,
+        "maxWorkers": 2,
+        "network": "shared-np-east",
+        "subnetwork": "https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2",
+        "machineType": "n2-standard-2",
+        "serviceAccountEmail": "sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com",
+        "additionalExperiments": ["use_runner_v2"],
+        "additionalUserLabels": {
+            "purpose": "bigquery-export",
+            "team": "data-engineering"
+        }
+    },
+    "sdkInfo": {
+        "language": "PYTHON"
+    }
+}
