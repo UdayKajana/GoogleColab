@@ -222,3 +222,74 @@ ENV FLEX_TEMPLATE_PYTHON_PY_FILE="/template/pipeline.py"
 ENV FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE="/template/requirements.txt"
 ENV FLEX_TEMPLATE_PYTHON_SETUP_FILE=""
 ENV FLEX_TEMPLATE_PYTHON_OPTIONS="--runner=DataflowRunner"
+
+
+
+
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
+from apache_beam.io.gcp.pubsub import ReadFromPubSub
+import argparse
+import logging
+
+logging.getLogger().setLevel(logging.INFO)
+
+class CustomPipelineOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
+        parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
+        parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
+        parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
+        parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
+        parser.add_argument('--template_location', dest='template_location', required=True, help='GCS bucket path to save template')
+        parser.add_argument('--query', dest='query', required=True, help='BigQuery Query')
+        parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='GCS Output Path')
+        parser.add_argument('--service_account_email', dest='service_account_email', required=True, help='Service Account Email')
+
+def run():
+    parser = argparse.ArgumentParser()
+    known_args, pipeline_args = parser.parse_known_args()
+
+    # Create the pipeline options with custom options
+    pipeline_options = CustomPipelineOptions(pipeline_args)
+    
+    # Set up credentials and project
+    pipeline_options.view_as(StandardOptions).runner = known_args.runner
+    
+    # Create and run the pipeline
+    with beam.Pipeline(options=pipeline_options) as p:
+        # Read from BigQuery using service account
+        bigquery_options = {
+            'query': known_args.query,
+            'use_standard_sql': True,
+            'temp_location': known_args.temp_location,
+            'project': known_args.project,
+            'credentials': None  # Will use the service account from environment
+        }
+
+        data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(**bigquery_options)
+
+        # Convert to CSV
+        csv_data = data | 'ConvertToCSV' >> beam.Map(
+            lambda row: ','.join(str(x) for x in row.values())
+        )
+
+        # Add logging
+        _ = csv_data | "LogData" >> beam.Map(
+            lambda element: logging.info(f"Processing element: {element}")
+        )
+
+        # Write to GCS using service account
+        output_path = f'{known_args.gcs_folder_path}/output'
+        _ = csv_data | 'WriteToGCS' >> beam.io.WriteToText(
+            output_path,
+            file_name_suffix='.csv',
+            header="ont_activation_date,data_circuit_id,circuit_id,video_circuit_id,"
+                   "service_type,address_id,vision_account_id,vision_customer_id,"
+                   "address_type,line_of_business"
+        )
+
+if __name__ == '__main__':
+    logging.getLogger().setLevel(logging.INFO)
+    run()
