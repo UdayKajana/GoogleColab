@@ -152,3 +152,73 @@ gcloud dataflow flex-template run bigquery-pipeline-tt \
     --temp-location gs://vznet-test/wireline_churn_test/tmp/ \
     --dataflow-kms-key projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
     --service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com
+
+
+
+{
+  "name": "BigQuery to GCS Pipeline",
+  "description": "A pipeline that reads from BigQuery and writes to GCS",
+  "parameters": [
+    {
+      "name": "query",
+      "label": "BigQuery Query",
+      "helpText": "The BigQuery query to execute",
+      "isOptional": false
+    },
+    {
+      "name": "gcs_folder_path",
+      "label": "GCS Output Folder",
+      "helpText": "GCS folder path for output files",
+      "isOptional": false
+    },
+    {
+      "name": "service_account_email",
+      "label": "Service Account Email",
+      "helpText": "Service account email to run the pipeline",
+      "isOptional": false
+    }
+  ],
+  "defaultEnvironment": {
+    "serviceAccountEmail": "sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com"
+  }
+}
+
+gcloud dataflow flex-template build gs://vznet-test/wireline_churn_test/src/template.json \
+    --image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 \
+    --sdk-language "PYTHON" \
+    --metadata-file metadata.json
+
+
+
+FROM gcr.io/dataflow-templates-base/python39-template-launcher-base
+
+# Set working directory
+WORKDIR /template
+
+# Set the service account environment variable
+ENV DATAFLOW_SERVICE_ACCOUNT="sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com"
+
+# Install additional system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libffi-dev \
+    libssl-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements file
+COPY requirements.txt /template/requirements.txt
+
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r /template/requirements.txt
+
+# Copy pipeline code
+COPY pipeline.py /template/pipeline.py
+RUN cat /template/pipeline.py
+
+# Set required environment variables
+ENV FLEX_TEMPLATE_PYTHON_PY_FILE="/template/pipeline.py"
+ENV FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE="/template/requirements.txt"
+ENV FLEX_TEMPLATE_PYTHON_SETUP_FILE=""
+ENV FLEX_TEMPLATE_PYTHON_OPTIONS="--runner=DataflowRunner"
