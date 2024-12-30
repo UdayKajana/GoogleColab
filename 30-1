@@ -116,3 +116,62 @@ gcloud dataflow flex-template run "bigquery-pipeline-$(date +%Y%m%d-%H%M%S)"    
 {"severity":"INFO","time":"2024/12/30 09:54:52.820457","line":"exec.go:52","message":"python failed with exit status 1"}
 {"severity":"ERROR","time":"2024/12/30 09:54:52.820582","line":"launch.go:80","message":"Error: Template launch failed: exit status 1"}
 {"severity":"INFO","time":"2024/12/30 09:54:52.820611","line":"launch.go:102","message":"Uploading console logs to GCS location: gs://dataflow-staging-us-east4-206482042907/staging/template_launches/2024-12-30_01_52_59-12775340974822554399/console_logs"}
+
+
+
+
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.pipeline_options import StandardOptions
+import argparse
+import logging
+
+logging.getLogger().setLevel(logging.ERROR)
+
+class TemplateOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        # Remove the --project argument as it's already defined in PipelineOptions
+        
+        # Required parameters
+        parser.add_argument('--query', dest='query', required=True, help='BigQuery SQL query')
+        parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Output GCS folder path')
+        
+        # Network configuration
+        parser.add_argument('--network', dest='network', required=True, help='VPC network')
+        parser.add_argument('--subnetwork', dest='subnetwork', required=True, help='VPC subnetwork')
+        
+        # Optional parameters with defaults
+        parser.add_argument('--region', dest='region', default='us-east4', help='GCP project region')
+        parser.add_argument('--service_account_email', dest='service_account_email', required=True, help='Service account email')
+        parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
+        parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
+
+def run(argv=None):
+    parser = argparse.ArgumentParser()
+    known_args, pipeline_args = parser.parse_known_args(argv)
+    
+    pipeline_options = TemplateOptions(pipeline_args)
+    pipeline_options.view_as(StandardOptions).runner = 'DataflowRunner'
+    
+    with beam.Pipeline(options=pipeline_options) as p:
+        # Reading from BigQuery
+        data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
+            query=pipeline_options.query,
+            use_standard_sql=True
+        )
+        
+        # Converting to CSV format
+        csv_data = data | 'ConvertToCSV' >> beam.Map(
+            lambda row: ','.join(str(x) for x in row.values())
+        )
+        
+        # Writing to GCS
+        csv_data | 'WriteToGCS' >> beam.io.WriteToText(
+            f'{pipeline_options.gcs_folder_path}/output.csv',
+            file_name_suffix='.csv',
+            header="ont_activation_date,data_circuit_id,circuit_id,video_circuit_id,service_type,address_id,vision_account_id,vision_customer_id,address_type,line_of_business"
+        )
+
+if __name__ == '__main__':
+    run()
