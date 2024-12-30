@@ -22,6 +22,7 @@ parser.add_argument('--template_location', dest='template_location', required=Tr
 # parser.add_argument('--input_table', dest='input_table', required=True, help='Input Subscription')
 parser.add_argument('--query', dest='query', required=True, help='Input Subscription')
 parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Input Subscription')
+parser.add_argument('--service_account_email', dest='service_account_email', required=True, help='service_account_email')
 known_args,beam_args = parser.parse_known_args()
 
 options = {
@@ -30,7 +31,8 @@ options = {
     'region': known_args.region,
     'staging_location': known_args.staging_location,
     'temp_location': known_args.temp_location,
-    'template_location': known_args.template_location
+    'template_location': known_args.template_location,
+    'service_account_email': known_args.service_account_email
 }
 pipeline_options = PipelineOptions.from_dictionary(options)
 p = beam.Pipeline(options=pipeline_options)
@@ -45,3 +47,29 @@ csv_data | 'WriteToGCS' >> beam.io.WriteToText(f'{known_args.gcs_folder_path}/ou
 #     table_id=known_args.spanner_table_id,
 # )
 p.run()
+
+
+gcloud dataflow flex-template build gs://vznet-test/wireline_churn_test/src/template.json \
+    --image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env:V1 \
+    --sdk-language "PYTHON" \
+    --metadata-file metadata.json
+
+# Run the Flex Template (corrected)
+gcloud dataflow flex-template run bigquery-pipeline-ttt \
+    --template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
+    --project vz-it-np-gudv-dev-vzntdo-0 \
+    --region us-east4 \
+    --parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10" \
+    --parameters gcs_folder_path=gs://vznet-test/wireline_churn_test/tmp/ \
+    --num-workers 2 \
+    --max-workers 2 \
+    --worker-machine-type n2-standard-2 \
+    --disable-public-ips \
+    --network shared-np-east \
+    --subnetwork https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2 \
+    --temp-location gs://vznet-test/wireline_churn_test/tmp/ \
+    --dataflow-kms-key projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv \
+    --service-account-email sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com \
+    --parameters service_account_email=sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com 
+
+    Workflow failed. Causes: Network default is not accessible to Dataflow Service account or does not exist. For network configuration instructions, see https://cloud.google.com/dataflow/docs/guides/specifying-networks.
