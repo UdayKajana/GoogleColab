@@ -1,0 +1,51 @@
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.pipeline_options import StandardOptions
+import argparse
+import logging
+
+logging.getLogger().setLevel(logging.ERROR)
+
+def run(argv=None):
+    """Main entry point; defines and runs the pipeline."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
+    parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
+    parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
+    parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
+    parser.add_argument('--query', dest='query', required=True, help='BigQuery SQL query')
+    parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Output GCS folder path')
+    
+    known_args, pipeline_args = parser.parse_known_args(argv)
+    
+    options = {
+        'project': known_args.project,
+        'region': known_args.region,
+        'staging_location': known_args.staging_location,
+        'temp_location': known_args.temp_location,
+    }
+    
+    pipeline_options = PipelineOptions.from_dictionary(options)
+    
+    with beam.Pipeline(options=pipeline_options) as p:
+        data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
+            query=known_args.query, 
+            use_standard_sql=True
+        )
+        
+        csv_data = data | 'ConvertToCSV' >> beam.Map(
+            lambda row: ','.join(str(x) for x in row.values())
+        )
+        
+        _ = csv_data | "PrintData" >> beam.Map(
+            lambda element: logging.log(logging.INFO, str(element))
+        )
+        
+        _ = csv_data | 'WriteToGCS' >> beam.io.WriteToText(
+            f'{known_args.gcs_folder_path}/output.csv',
+            file_name_suffix='.csv',
+            header="ont_activation_date,data_circuit_id,circuit_id,video_circuit_id,service_type,address_id,vision_account_id,vision_customer_id,address_type,line_of_business"
+        )
+
+if __name__ == '__main__':
+    run()
