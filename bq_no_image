@@ -8,24 +8,12 @@ logging.getLogger().setLevel(logging.ERROR)
 
 # Parsing command-line arguments
 parser = argparse.ArgumentParser()
-parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
-parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
-parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
-parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
-parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
 parser.add_argument('--query', dest='query', required=True, help='BigQuery SQL query')
 parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Output GCS folder path')
 known_args, beam_args = parser.parse_known_args()
 
-# Setting pipeline options
-options = {
-    'project': known_args.project,
-    'runner': known_args.runner,
-    'region': known_args.region,
-    'staging_location': known_args.staging_location,
-    'temp_location': known_args.temp_location
-}
-pipeline_options = PipelineOptions.from_dictionary(options)
+# Pipeline options for Dataflow template creation
+pipeline_options = PipelineOptions(beam_args)
 p = beam.Pipeline(options=pipeline_options)
 
 # Defining the pipeline
@@ -37,17 +25,24 @@ csv_data | 'WriteToGCS' >> beam.io.WriteToText(
     header="ont_activation_date, data_circuit_id, circuit_id, video_circuit_id, service_type, address_id, vision_account_id, vision_customer_id, address_type, line_of_business"
 )
 
-p.run()
-gcloud dataflow jobs run bigquery-pipeline-tt \
-    --gcs-location gs://vznet-test/wireline_churn_test/tmp/template.json \
+# Template creation only
+if __name__ == '__main__':
+    p.run()
+
+
+gcloud dataflow jobs run bigquery-pipeline-template-creation \
+    --gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
     --region us-east4 \
-    --parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10" \
-    --parameters gcs_folder_path=gs://vznet-test/wireline_churn_test/tmp/ \
-    --project vz-it-np-gudv-dev-vzntdo-0 \
     --runner DataflowRunner \
     --staging-location gs://vznet-test/wireline_churn_test/tmp/ \
     --temp-location gs://vznet-test/wireline_churn_test/tmp/ \
+    --project vz-it-np-gudv-dev-vzntdo-0 \
+    --template-location gs://vznet-test/wireline_churn_test/src/template.json
+gcloud dataflow flex-template run bigquery-pipeline-tt \
+    --template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template.json \
     --region us-east4 \
+    --parameters query="SELECT * FROM vz-it-np-gudv-dev-vzntdo-0.vzn_nsdl_common_core_tbls.echo_ticket_opened_proc_v0 LIMIT 10" \
+    --parameters gcs_folder_path=gs://vznet-test/wireline_churn_test/tmp/ \
     --num-workers 2 \
     --max-workers 2 \
     --worker-machine-type n2-standard-2 \
