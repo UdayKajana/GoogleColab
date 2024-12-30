@@ -41,3 +41,65 @@ def run(argv=None):
 
 if __name__ == '__main__':
     run()
+
+
+FROM gcr.io/dataflow-templates-base/python39-template-launcher-base
+WORKDIR /template
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libffi-dev \
+    libssl-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+COPY requirements.txt /template/requirements.txt
+COPY pipeline.py /template/pipeline.py
+RUN cat /template/pipeline.py
+ENV DATAFLOW_SERVICE_ACCOUNT="sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com"
+ENV FLEX_TEMPLATE_PYTHON_PY_FILE="/template/pipeline.py"
+ENV FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE="/template/requirements.txt"
+ENV FLEX_TEMPLATE_PYTHON_SETUP_FILE=""
+ENV FLEX_TEMPLATE_PYTHON_OPTIONS="--runner=DataflowRunner"
+
+
+
+{
+    "name": "BigQuery to GCS Pipeline",
+    "description": "A pipeline that reads from BigQuery and writes to GCS",
+    "parameters": [
+        {
+            "name": "query",
+            "label": "BigQuery SQL query",
+            "helpText": "SQL query to execute",
+            "paramType": "TEXT",
+            "isOptional": false
+        },
+        {
+            "name": "gcs_folder_path",
+            "label": "Output GCS folder path",
+            "helpText": "GCS location to write output files",
+            "paramType": "TEXT",
+            "isOptional": false
+        },
+        {
+            "name": "network",
+            "label": "VPC Network",
+            "helpText": "The VPC network to use",
+            "paramType": "TEXT",
+            "isOptional": false
+        },
+        {
+            "name": "subnetwork",
+            "label": "VPC Subnetwork",
+            "helpText": "The VPC subnetwork to use",
+            "paramType": "TEXT",
+            "isOptional": false
+        },
+        {
+            "name": "service_account_email",
+            "label": "Service Account Email",
+            "helpText": "Service account email to run the job",
+            "paramType": "TEXT",
+            "isOptional": false
+        }
+    ]
+}
