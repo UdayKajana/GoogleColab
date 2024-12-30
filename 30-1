@@ -48,3 +48,90 @@ dataflow_flex_template_task = DataflowStartFlexTemplateOperator(
 )
 
 dataflow_flex_template_task
+
+
+
+
+
+
+
+
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.pipeline_options import StandardOptions
+
+import argparse
+import logging
+logging.getLogger().setLevel(logging.ERROR)
+
+class TemplateOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_value_provider_argument('--params', type=str)
+
+# Define processing logic functions
+def logic_method_a(row):
+    return ','.join([str(row.get(col, '')) for col in ['col_a', 'col_b', 'col_c']])
+
+def logic_method_b(row):
+    return ','.join([str(row.get(col, '')) for col in ['col_x', 'col_y', 'col_z']])
+
+# Define a DoFn for dynamic processing
+class ConvertToCSV(beam.DoFn):
+    def __init__(self, process_name):
+        self.process_name = process_name
+
+    def process(self, row):
+        if self.process_name == 'process_a':
+            yield logic_method_a(row)
+        elif self.process_name == 'process_b':
+            yield logic_method_b(row)
+        else:
+            raise ValueError(f"Unknown process_name: {self.process_name}")
+
+# Main argument parsing and pipeline definition
+parser = argparse.ArgumentParser()
+parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
+parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
+parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
+parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
+parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
+parser.add_argument('--template_location', dest='template_location', required=True, help='GCS bucket path to save template')
+parser.add_argument('--query', dest='query', required=True, help='BigQuery SQL query')
+parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='GCS folder path for output')
+parser.add_argument('--service_account_email', dest='service_account_email', required=True, help='Service account email')
+parser.add_argument('--process_name', dest='process_name', required=True, help='Processing method name')
+
+known_args, beam_args = parser.parse_known_args()
+
+options = {
+    'project': known_args.project,
+    'runner': known_args.runner,
+    'region': known_args.region,
+    'staging_location': known_args.staging_location,
+    'temp_location': known_args.temp_location,
+    'template_location': known_args.template_location,
+    'service_account_email': known_args.service_account_email
+}
+pipeline_options = PipelineOptions.from_dictionary(options)
+
+# Define the pipeline
+p = beam.Pipeline(options=pipeline_options)
+
+# Read data from BigQuery
+data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(query=known_args.query, use_standard_sql=True)
+
+# Apply the appropriate processing logic using ParDo
+csv_data = data | 'ConvertToCSV' >> beam.ParDo(ConvertToCSV(known_args.process_name))
+
+# Print and save the processed data
+csv_data | 'PrintData' >> beam.Map(lambda element: logging.log(logging.INFO, str(element)))
+
+csv_data | 'WriteToGCS' >> beam.io.WriteToText(
+    f'{known_args.gcs_folder_path}/output.csv',
+    file_name_suffix='.csv',
+    header="ont_activation_date, data_circuit_id, circuit_id, video_circuit_id, service_type, address_id, vision_account_id, vision_customer_id, address_type, line_of_business"
+)
+
+p.run()
+
