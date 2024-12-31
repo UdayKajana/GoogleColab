@@ -1,0 +1,305 @@
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.pipeline_options import StandardOptions
+import argparse
+import logging
+
+logging.getLogger().setLevel(logging.ERROR)
+
+class PrepareData(beam.DoFn):
+    def __init__(self, process_name):
+        self.process_name = process_name
+    def dim_inventory_customer_profiles_norm_v0(row):
+        return ','.join([str(row.get(col, '')) for col in ["ont_activation_date", "data_circuit_id", "circuit_id", "video_circuit_id", "service_type", "address_id", "vision_account_id", "vision_customer_id", "address_type", "line_of_business"]])
+    def vrepair_ticket_opened_norm_v0(row):
+        return ','.join([str(row.get(col, '')) for col in ["telephone_number","trouble_report_num","address_id","chronic_flag","chronic_total","line_id_trimmed","port_associated_service","date opened ","data_circuit_id","video_circuit_id"]])
+    def dom_fact_sls_to_prov_walk(row):
+        return ','.join([str(row.get(col, '')) for col in ["acct_sk","mon","cust_sk","svc_party_sk","acct_estbd_dt","acct_term_dt"]])
+    def dom_cdi_keys_xref(row):
+        return ','.join([str(row.get(col, '')) for col in ["acct_sk","mon","cust_sk","svc_party_sk","acct_estbd_dt","acct_term_dt"]])
+    def model_scores_prospect_hist(row):
+        return ','.join([str(row.get(col, '')) for col in ["addr_id","state_cd","model_id","model_version","round_cycle","model_score","model_decile","model_centile","model_segment","model_subsegment","scoring_driver_1","scoring_driver_2","scoring_driver_3","create_date"]])
+    def wln_model_scores(row):
+        return ','.join([str(row.get(col, '')) for col in ["acct_sk","acct_type_cd","create_date","epsilon_cust_id","insert_ts","model_centile","model_decile","model_id","model_score","model_subsegment","model_version","round_cycle","scoring_driver_1","scoring_driver_2","scoring_driver_3"]])
+
+    def process(self, row):
+        # if self.process_name == 'dim_inventory_customer_profiles_norm_v0':
+        #     yield dim_inventory_customer_profiles_norm_v0(row)
+        # elif self.process_name == 'vrepair_ticket_opened_norm_v0':
+        #     yield vrepair_ticket_opened_norm_v0(row)
+        if self.process_name == 'dom_fact_sls_to_prov_walk':
+            yield self.dom_fact_sls_to_prov_walk(row)
+        elif self.process_name == 'dom_cdi_keys_xref':
+            yield self.dom_cdi_keys_xref(row)
+        elif self.process_name == 'model_scores_prospect_hist':
+            yield self.model_scores_prospect_hist(row)
+        elif self.process_name == 'wln_model_scores':
+            yield self.wln_model_scores(row)        
+        else:
+            raise ValueError(f"Unknown process_name: {self.process_name}")
+
+class TemplateOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_argument('--query', dest='query', required=True, help='BigQuery SQL query')
+        parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Output GCS folder path')
+        parser.add_argument('--process_name', dest='process_name', required=True, help='Output GCS folder path')
+
+def run(argv=None):
+    parser = argparse.ArgumentParser()
+    known_args, pipeline_args = parser.parse_known_args(argv)
+    
+    pipeline_options = TemplateOptions(pipeline_args)
+    pipeline_options.view_as(StandardOptions).runner = 'DataflowRunner'
+    
+    with beam.Pipeline(options=pipeline_options) as p:
+        # Reading from BigQuery
+        data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
+            query=pipeline_options.query,
+            use_standard_sql=True
+        )
+        csv_data = data | 'PrepareData' >> beam.ParDo(PrepareData(pipeline_options.process_name))
+        csv_data | 'PrintData' >> beam.Map(lambda element: logging.log(logging.INFO, str(element)))
+        csv_data | 'WriteToGCS' >> beam.io.WriteToText(f'{pipeline_options.gcs_folder_path}/output.csv',file_name_suffix='.csv')
+if __name__ == '__main__':
+    run()
+
+
+
+Workflow failed. Causes: S06:ref_AppliedPTransform_ReadFromBigQuery-Read-SDFBoundedSourceReader-ParDo-SDFBoundedSourceDoFn-_13/ProcessElementAndRestrictionWithSizing+ReadFromBigQuery/_PassThroughThenCleanup/ParDo(PassThrough)/ParDo(PassThrough)+PrepareData+PrintData+WriteToGCS/Write/WriteImpl/WindowInto(WindowIntoFn)+WriteToGCS/Write/WriteImpl/WriteBundles+WriteToGCS/Write/WriteImpl/Pair+WriteToGCS/Write/WriteImpl/GroupByKey/Write failed., The job failed because a work item has failed 4 times. Look in previous log entries for the cause of each one of the 4 failures. If the logs only contain generic timeout errors related to accessing external resources, such as MongoDB, verify that the worker service account has permission to access the resource's subnetwork. For more information, see https://cloud.google.com/dataflow/docs/guides/common-errors. The work item was attempted on these workers: 
+
+      Root cause: Traceback (most recent call last):
+  File "apache_beam/runners/common.py", line 1501, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 689, in apache_beam.runners.common.SimpleInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1676, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "/template/pipeline.py", line 35, in process
+TypeError: model_scores_prospect_hist() takes 1 positional argument but 2 were given
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 311, in _execute
+    response = task()
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 386, in <lambda>
+    lambda: self.create_worker().do_instruction(request), request)
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 656, in do_instruction
+    return getattr(self, request_type)(
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 694, in process_bundle
+    bundle_processor.process_bundle(instruction_id))
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 1274, in process_bundle
+    input_op_by_transform_id[element.transform_id].process_encoded(
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 237, in process_encoded
+    self.output(decoded_value)
+  File "apache_beam/runners/worker/operations.py", line 5, in apache_beam.runners.worker.operations.Operation.output
+  File "apache_beam/runners/worker/operations.py", line 569, in apache_beam.runners.worker.operations.Operation.output
+  File "apache_beam/runners/worker/operations.py", line 260, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 263, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 1064, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
+  File "apache_beam/runners/worker/operations.py", line 1073, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
+  File "apache_beam/runners/common.py", line 1532, in apache_beam.runners.common.DoFnRunner.process_with_sized_restriction
+  File "apache_beam/runners/common.py", line 897, in apache_beam.runners.common.PerWindowInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1059, in apache_beam.runners.common.PerWindowInvoker._invoke_process_per_window
+  File "apache_beam/runners/common.py", line 1686, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "apache_beam/runners/common.py", line 1799, in apache_beam.runners.common._OutputHandler._write_value_to_tag
+  File "apache_beam/runners/worker/operations.py", line 263, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 950, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/worker/operations.py", line 951, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/common.py", line 1503, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 1591, in apache_beam.runners.common.DoFnRunner._reraise_augmented
+  File "apache_beam/runners/common.py", line 1501, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 689, in apache_beam.runners.common.SimpleInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1686, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "apache_beam/runners/common.py", line 1799, in apache_beam.runners.common._OutputHandler._write_value_to_tag
+  File "apache_beam/runners/worker/operations.py", line 263, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 950, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/worker/operations.py", line 951, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/common.py", line 1503, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 1612, in apache_beam.runners.common.DoFnRunner._reraise_augmented
+  File "apache_beam/runners/common.py", line 1501, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 689, in apache_beam.runners.common.SimpleInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1676, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "/template/pipeline.py", line 35, in process
+TypeError: model_scores_prospect_hist() takes 1 positional argument but 2 were given [while running 'PrepareData-ptransform-67']
+
+      Worker ID: bigquery-pipeline-2024123-12310326-2px2-harness-8wn7,
+
+      Root cause: Traceback (most recent call last):
+  File "apache_beam/runners/common.py", line 1501, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 689, in apache_beam.runners.common.SimpleInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1676, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "/template/pipeline.py", line 35, in process
+TypeError: model_scores_prospect_hist() takes 1 positional argument but 2 were given
+
+During handling of the above exception, another exception occured:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 311, in _execute
+    response = task()
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 386, in <lambda>
+    lambda: self.create_worker().do_instruction(request), request)
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 656, in do_instruction
+    return getattr(self, request_type)(
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 694, in process_bundle
+    bundle_processor.process_bundle(instruction_id))
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 1274, in process_bundle
+    input_op_by_transform_id[element.transform_id].process_encoded(
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 237, in process_encoded
+    self.output(decoded_value)
+  File "apache_beam/runners/worker/operations.py", line 567, in apache_beam.runners.worker.operations.Operation.output
+  File "apache_beam/runners/worker/operations.py", line 569, in apache_beam.runners.worker.operations.Operation.output
+  File "apache_beam/runners/worker/operations.py", line 260, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 263, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 1064, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
+  File "apache_beam/runners/worker/operations.py", line 1073, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
+  File "apache_beam/runners/common.py", line 1532, in apache_beam.runners.common.DoFnRunner.process_with_sized_restriction
+  File "apache_beam/runners/common.py", line 897, in apache_beam.runners.common.PerWindowInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1059, in apache_beam.runners.common.PerWindowInvoker._invoke_process_per_window
+  File "apache_beam/runners/common.py", line 1686, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "apache_beam/runners/common.py", line 1799, in apache_beam.runners.common._OutputHandler._write_value_to_tag
+  File "apache_beam/runners/worker/operations.py", line 263, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 950, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/worker/operations.py", line 951, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/common.py", line 1503, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 1591, in apache_beam.runners.common.DoFnRunner._reraise_augmented
+  File "apache_beam/runners/common.py", line 1501, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 689, in apache_beam.runners.common.SimpleInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1686, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "apache_beam/runners/common.py", line 1799, in apache_beam.runners.common._OutputHandler._write_value_to_tag
+  File "apache_beam/runners/worker/operations.py", line 263, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 950, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/worker/operations.py", line 951, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/common.py", line 1503, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 1612, in apache_beam.runners.common.DoFnRunner._reraise_augmented
+  File "apache_beam/runners/common.py", line 1501, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 689, in apache_beam.runners.common.SimpleInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1676, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "/template/pipeline.py", line 35, in process
+TypeError: model_scores_prospect_hist() takes 1 positional argument but 2 were given [while running 'PrepareData-ptransform-67']
+
+      Worker ID: bigquery-pipeline-2024123-12310326-2px2-harness-8wn7,
+
+      Root cause: Traceback (most recent call last):
+  File "apache_beam/runners/common.py", line 1501, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 689, in apache_beam.runners.common.SimpleInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1676, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "/template/pipeline.py", line 35, in process
+TypeError: model_scores_prospect_hist() takes 1 positional argument but 2 were given
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 311, in _execute
+    response = task()
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 386, in <lambda>
+    lambda: self.create_worker().do_instruction(request), request)
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 656, in do_instruction
+    return getattr(self, request_type)(
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 694, in process_bundle
+    bundle_processor.process_bundle(instruction_id))
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 1274, in process_bundle
+    input_op_by_transform_id[element.transform_id].process_encoded(
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 237, in process_encoded
+    self.output(decoded_value)
+  File "apache_beam/runners/worker/operations.py", line 567, in apache_beam.runners.worker.operations.Operation.output
+  File "apache_beam/runners/worker/operations.py", line 569, in apache_beam.runners.worker.operations.Operation.output
+  File "apache_beam/runners/worker/operations.py", line 260, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 263, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 1064, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
+  File "apache_beam/runners/worker/operations.py", line 1073, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
+  File "apache_beam/runners/common.py", line 1532, in apache_beam.runners.common.DoFnRunner.process_with_sized_restriction
+  File "apache_beam/runners/common.py", line 897, in apache_beam.runners.common.PerWindowInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1059, in apache_beam.runners.common.PerWindowInvoker._invoke_process_per_window
+  File "apache_beam/runners/common.py", line 1686, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "apache_beam/runners/common.py", line 1799, in apache_beam.runners.common._OutputHandler._write_value_to_tag
+  File "apache_beam/runners/worker/operations.py", line 263, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 950, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/worker/operations.py", line 951, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/common.py", line 1503, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 1591, in apache_beam.runners.common.DoFnRunner._reraise_augmented
+  File "apache_beam/runners/common.py", line 1501, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 689, in apache_beam.runners.common.SimpleInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1686, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "apache_beam/runners/common.py", line 1799, in apache_beam.runners.common._OutputHandler._write_value_to_tag
+  File "apache_beam/runners/worker/operations.py", line 263, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 950, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/worker/operations.py", line 951, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/common.py", line 1503, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 1612, in apache_beam.runners.common.DoFnRunner._reraise_augmented
+  File "apache_beam/runners/common.py", line 1501, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 689, in apache_beam.runners.common.SimpleInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1676, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "/template/pipeline.py", line 35, in process
+TypeError: model_scores_prospect_hist() takes 1 positional argument but 2 were given [while running 'PrepareData-ptransform-67']
+
+      Worker ID: bigquery-pipeline-2024123-12310326-2px2-harness-8wn7,
+
+      Root cause: Traceback (most recent call last):
+  File "apache_beam/runners/common.py", line 1501, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 689, in apache_beam.runners.common.SimpleInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1676, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "/template/pipeline.py", line 35, in process
+TypeError: model_scores_prospect_hist() takes 1 positional argument but 2 were given
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 311, in _execute
+    response = task()
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 386, in <lambda>
+    lambda: self.create_worker().do_instruction(request), request)
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 656, in do_instruction
+    return getattr(self, request_type)(
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/sdk_worker.py", line 694, in process_bundle
+    bundle_processor.process_bundle(instruction_id))
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 1274, in process_bundle
+    input_op_by_transform_id[element.transform_id].process_encoded(
+  File "/usr/local/lib/python3.9/site-packages/apache_beam/runners/worker/bundle_processor.py", line 237, in process_encoded
+    self.output(decoded_value)
+  File "apache_beam/runners/worker/operations.py", line 567, in apache_beam.runners.worker.operations.Operation.output
+  File "apache_beam/runners/worker/operations.py", line 569, in apache_beam.runners.worker.operations.Operation.output
+  File "apache_beam/runners/worker/operations.py", line 260, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 263, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 1064, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
+  File "apache_beam/runners/worker/operations.py", line 1073, in apache_beam.runners.worker.operations.SdfProcessSizedElements.process
+  File "apache_beam/runners/common.py", line 1532, in apache_beam.runners.common.DoFnRunner.process_with_sized_restriction
+  File "apache_beam/runners/common.py", line 897, in apache_beam.runners.common.PerWindowInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1059, in apache_beam.runners.common.PerWindowInvoker._invoke_process_per_window
+  File "apache_beam/runners/common.py", line 1686, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "apache_beam/runners/common.py", line 1799, in apache_beam.runners.common._OutputHandler._write_value_to_tag
+  File "apache_beam/runners/worker/operations.py", line 263, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 950, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/worker/operations.py", line 951, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/common.py", line 1503, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 1591, in apache_beam.runners.common.DoFnRunner._reraise_augmented
+  File "apache_beam/runners/common.py", line 1501, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 689, in apache_beam.runners.common.SimpleInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1686, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "apache_beam/runners/common.py", line 1799, in apache_beam.runners.common._OutputHandler._write_value_to_tag
+  File "apache_beam/runners/worker/operations.py", line 263, in apache_beam.runners.worker.operations.SingletonElementConsumerSet.receive
+  File "apache_beam/runners/worker/operations.py", line 950, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/worker/operations.py", line 951, in apache_beam.runners.worker.operations.DoOperation.process
+  File "apache_beam/runners/common.py", line 1503, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 1612, in apache_beam.runners.common.DoFnRunner._reraise_augmented
+  File "apache_beam/runners/common.py", line 1501, in apache_beam.runners.common.DoFnRunner.process
+  File "apache_beam/runners/common.py", line 689, in apache_beam.runners.common.SimpleInvoker.invoke_process
+  File "apache_beam/runners/common.py", line 1676, in apache_beam.runners.common._OutputHandler.handle_process_outputs
+  File "/template/pipeline.py", line 35, in process
+TypeError: model_scores_prospect_hist() takes 1 positional argument but 2 were given [while running 'PrepareData-ptransform-67']
+
+      Worker ID: bigquery-pipeline-2024123-12310326-2px2-harness-8wn7
+{
+errorGroups: [1]
+httpRequest: null
+insertId: "jpuqozd1zep"
+jsonPayload: null
+labels: {4}
+logName: "projects/vz-it-np-gudv-dev-vzntdo-0/logs/dataflow.googleapis.com%2Fjob-message"
+operation: null
+payload: "textPayload"
+protoPayload: null
+receiveLocation: "us-east4"
+receiveTimestamp: "2024-12-31T11:28:58.192121715Z"
+resource: {2}
+severity: "ERROR"
+sourceLocation: null
+split: null
