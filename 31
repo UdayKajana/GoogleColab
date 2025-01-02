@@ -1,29 +1,17 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.options.pipeline_options import StandardOptions
-from apache_beam.io.gcp.pubsub import ReadFromPubSub
 import argparse
 import logging
-import json
 
 logging.getLogger().setLevel(logging.ERROR)
-
-class DecodeAvroRecrds(beam.DoFn):
-    def process(self, element):
-        import avro.io as avro_io
-        import avro.schema
-        from io import BytesIO
-        import time
-        import datetime
-
-        
-        
 
 class PrepareData(beam.DoFn):
     def __init__(self, process_name):
         self.process_name = process_name
     def dim_inventory_customer_profiles_norm_v0(self,row):
         return ','.join([str(row.get(col, '')) for col in ["ont_activation_date", "data_circuit_id", "circuit_id", "video_circuit_id", "service_type", "address_id", "vision_account_id", "vision_customer_id", "address_type", "line_of_business"]])
+    
     def vrepair_ticket_opened_norm_v0(self,element):
         import avro.io as avro_io
         import avro.schema
@@ -63,11 +51,10 @@ class PrepareData(beam.DoFn):
         except ValueError as e:
             logging.log(logging.INFO, f"Error deserializing the records :: {e}")
         reformatted = self.reformat_input_msg_schema(message)
-        yield reformatted
+        return reformatted
         # return ','.join([str(row.get(col, '')) for col in ["telephone_number","trouble_report_num","address_id","chronic_flag","chronic_total","line_id_trimmed","port_associated_service","date opened ","data_circuit_id","video_circuit_id"]])
-    def dom_fact_sls_to_prov_walk(self,row):
-        return ','.join([str(row.get(col, '')) for col in ["acct_sk","mon","cust_sk","svc_party_sk","acct_estbd_dt","acct_term_dt"]])
-    def dom_cdi_keys_xref(self,row):
+    
+    def dom_cdi_keys_xref_dom_fact_sls_to_prov_walk(self,row):
         return ','.join([str(row.get(col, '')) for col in ["acct_sk","mon","cust_sk","svc_party_sk","acct_estbd_dt","acct_term_dt"]])
     def model_scores_prospect_hist(self,row):
         return ','.join([str(row.get(col, '')) for col in ["addr_id","state_cd","model_id","model_version","round_cycle","model_score","model_decile","model_centile","model_segment","model_subsegment","scoring_driver_1","scoring_driver_2","scoring_driver_3","create_date"]])
@@ -96,14 +83,12 @@ class PrepareData(beam.DoFn):
         return fmt_msg
 
     def process(self, row):
-        # if self.process_name == 'dim_inventory_customer_profiles_norm_v0':
-        #     yield dim_inventory_customer_profiles_norm_v0(row)
-        # elif self.process_name == 'vrepair_ticket_opened_norm_v0':
-        #     yield vrepair_ticket_opened_norm_v0(row)
-        if self.process_name == 'dom_fact_sls_to_prov_walk':
-            yield self.dom_fact_sls_to_prov_walk(row)
-        elif self.process_name == 'dom_cdi_keys_xref':
-            yield self.dom_cdi_keys_xref(row)
+        if self.process_name == 'dim_inventory_customer_profiles_norm_v0':
+            yield self.dim_inventory_customer_profiles_norm_v0(row)
+        elif self.process_name == 'vrepair_ticket_opened_norm_v0':
+            yield self.vrepair_ticket_opened_norm_v0(row)
+        elif self.process_name == 'dom_fact_sls_to_prov_walk' or self.process_name == 'dom_cdi_keys_xref':
+            yield self.dom_cdi_keys_xref_dom_fact_sls_to_prov_walk(row)
         elif self.process_name == 'model_scores_prospect_hist':
             yield self.model_scores_prospect_hist(row)
         elif self.process_name == 'wln_model_scores':
@@ -114,7 +99,7 @@ class PrepareData(beam.DoFn):
 class TemplateOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
-        parser.add_argument('--pubsub_subscription_id', dest='pubsub_subscription_id', required=True, help='BigQuery SQL query')
+        parser.add_argument('--query', dest='query', required=True, help='BigQuery SQL query')
         parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Output GCS folder path')
         parser.add_argument('--process_name', dest='process_name', required=True, help='Output GCS folder path')
 
@@ -126,18 +111,20 @@ def run(argv=None):
     pipeline_options.view_as(StandardOptions).runner = 'DataflowRunner'
     
     with beam.Pipeline(options=pipeline_options) as p:
-        data=p|f'ReadFromPubsub{pipeline_args.pubsub_subscription_id}' >> ReadFromPubSub( subscription=f"projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/wireline_churn_test_topic-sub")
-        decoded_data = data|"Decode" >> beam.ParDo(DecodeAvroRecrds())
-        string_data = decoded_data| "Convert to String" >> beam.Map(lambda x:json.dumps(x))
-        string_data | 'PrintData' >> beam.Map(lambda element: logging.log(logging.INFO, str(element)))
-              #|"log messages" >> beam.Map(lambda x:logging.info(x))
-        # Reading from BigQuery
-        # data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
-        #     query=pipeline_options.query,
-        #     use_standard_sql=True
-        # )
-        # csv_data = data | 'PrepareData' >> beam.ParDo(PrepareData(pipeline_options.process_name))
-        # csv_data | 'PrintData' >> beam.Map(lambda element: logging.log(logging.INFO, str(element)))
-        # csv_data | 'WriteToGCS' >> beam.io.WriteToText(f'{pipeline_options.gcs_folder_path}/output.csv',file_name_suffix='.csv')
+        headers = {
+            'dom_fact_sls_to_prov_walk':"acct_sk,mon,cust_sk,svc_party_sk,acct_estbd_dt,acct_term_dt",
+            'dom_cdi_keys_xref':"acct_sk,mon,cust_sk,svc_party_sk,acct_estbd_dt,acct_term_dt",
+            'model_scores_prospect_hist':"addr_id,state_cd,model_id,model_version,round_cycle,model_score,model_decile,model_centile,model_segment,model_subsegment,scoring_driver_1,scoring_driver_2,scoring_driver_3,create_date",
+            'wln_model_scores': "acct_sk,acct_type_cd,create_date,epsilon_cust_id,insert_ts,model_centile,model_decile,model_id,model_score,model_subsegment,model_version,round_cycle,scoring_driver_1,scoring_driver_2,scoring_driver_3",
+            'dim_inventory_customer_profiles_norm_v0':"ont_activation_date,data_circuit_id,circuit_id,video_circuit_id,service_type,address_id,vision_account_id,vision_customer_id,address_type,line_of_business",
+            'vrepair_ticket_opened_norm_v0': "telephone_number,trouble_report_num,address_id,chronic_flag,chronic_total,line_id_trimmed,port_associated_service,date_opened,data_circuit_id,video_circuit_id"
+        }
+        data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
+            query=pipeline_options.query,
+            use_standard_sql=True
+        )
+        csv_data = data | 'PrepareData' >> beam.ParDo(PrepareData(pipeline_options.process_name))
+        csv_data | 'PrintData' >> beam.Map(lambda element: logging.log(logging.INFO, f'{pipeline_options.gcs_folder_path}/{pipeline_options.process_name}||{headers.get(pipeline_options.process_name)}'))
+        csv_data | 'WriteToGCS' >> beam.io.WriteToText(f'{pipeline_options.gcs_folder_path}/{pipeline_options.process_name}', header= headers.get(pipeline_options.process_name),file_name_suffix='.csv')
 if __name__ == '__main__':
     run()
