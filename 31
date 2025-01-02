@@ -1,20 +1,143 @@
- gcloud dataflow flex-template run "bigquery-pipeline-$(date +%Y%m%d-%H%M%S)"     --template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template_model_scores_prospect_hist.json     --project vz-it-np-gudv-dev-vzntdo-0     --region us-east4     --parameters query="SELECT addr_id, state_cd, model_id, model_version, round_cycle, model_score, model_decile, model_centile, model_segment, model_subsegment, scoring_driver_1, scoring_driver_2, scoring_driver_3, create_date FROM vz-it-pr-gk1v-cwlsdo-0.vzt_cja_prd_tbls_rd_v.model_scores_prospect_hist WHERE create_date = DATE(2024,12,19)"     --parameters gcs_folder_path="gs://vznet-test/wireline_churn_test/tmp/"     --parameters network="shared-np-east"     --parameters process_name="model_scores_prospect_hist"  --parameters subnetwork="https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2"     --parameters service_account_email="sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com"     --num-workers 2     --max-workers 2     --worker-machine-type n2-standard-2     --disable-public-ips     --temp-location gs://vznet-test/wireline_churn_test/tmp/     --dataflow-kms-key projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv
-ERROR: (gcloud.dataflow.flex-template.run) argument --parameters: Bad syntax for dict arg: [ state_cd]. Please see `gcloud topic flags-file` or `gcloud topic escaping` for information on providing list or dictionary flag values with special characters.
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.options.pipeline_options import StandardOptions
+from apache_beam.io.gcp.pubsub import ReadFromPubSub
+import argparse
+import logging
+import json
 
+logging.getLogger().setLevel(logging.ERROR)
 
-gcloud dataflow flex-template run "bigquery-pipeline-$(date +%Y%m%d-%H%M%S)" \
-    --template-file-gcs-location gs://vznet-test/wireline_churn_test/src/template_model_scores_prospect_hist.json \
-    --project vz-it-np-gudv-dev-vzntdo-0 \
-    --region us-east4 \
-    --parameters query='SELECT addr_id, state_cd, model_id, model_version, round_cycle, model_score, model_decile, model_centile, model_segment, model_subsegment, scoring_driver_1, scoring_driver_2, scoring_driver_3, create_date FROM vz-it-pr-gk1v-cwlsdo-0.vzt_cja_prd_tbls_rd_v.model_scores_prospect_hist WHERE create_date = DATE(2024,12,19)' \
-    --parameters gcs_folder_path="gs://vznet-test/wireline_churn_test/tmp/" \
-    --parameters network="shared-np-east" \
-    --parameters process_name="model_scores_prospect_hist" \
-    --parameters subnetwork="https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2" \
-    --parameters service_account_email="sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com" \
-    --num-workers 2 \
-    --max-workers 2 \
-    --worker-machine-type n2-standard-2 \
-    --disable-public-ips \
-    --temp-location gs://vznet-test/wireline_churn_test/tmp/ \
-    --dataflow-kms-key projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv
+class DecodeAvroRecrds(beam.DoFn):
+    def process(self, element):
+        import avro.io as avro_io
+        import avro.schema
+        from io import BytesIO
+        import time
+        import datetime
+
+        
+        
+
+class PrepareData(beam.DoFn):
+    def __init__(self, process_name):
+        self.process_name = process_name
+    def dim_inventory_customer_profiles_norm_v0(self,row):
+        return ','.join([str(row.get(col, '')) for col in ["ont_activation_date", "data_circuit_id", "circuit_id", "video_circuit_id", "service_type", "address_id", "vision_account_id", "vision_customer_id", "address_type", "line_of_business"]])
+    def vrepair_ticket_opened_norm_v0(self,element):
+        import avro.io as avro_io
+        import avro.schema
+        from io import BytesIO
+        import time
+        import datetime
+        message: dict = {}
+        raw_schema = """{"namespace": "com.vz.vznet",
+                                           "type": "record",
+                                           "name": "VznetDefault",
+                                           "doc": "Default schema for events in transit",
+                                           "fields": [
+                                           {"name": "timestamp", "type": "long"},
+                                           {"name": "host", "type": "string"},
+                                           {"name": "src",  "type": "string" },
+                                           {"name": "_event_ingress_ts", "type": "long"},
+                                           {"name": "_event_origin", "type": "string"},
+                                           {"name": "_event_tags", "type": {"type": "array", "items": "string"}},
+                                           {"name": "_event_route", "type": "string"},
+                                           {"name": "_event_metrics", "type": ["null", "bytes"], "default": null},
+                                           {"name": "rawdata", "type": "bytes"}
+                                           ]
+                                           }"""
+        try:
+            if isinstance(raw_schema, dict):
+                raw_schema = json.dumps(raw_schema)
+            schema = avro.schema.parse(raw_schema)
+            avro_reader: avro_io.DatumReader = avro_io.DatumReader(schema)
+            avro_message: avro_io.BinaryDecoder = avro_io.BinaryDecoder(BytesIO(element))
+            message = avro_reader.read(avro_message)
+            if schema.name == 'VznetDefault':
+                message['rawdata'] = message['rawdata'].decode("utf-8")
+                if message['_event_metrics'] is None:
+                    message['_event_metrics'] = message['_event_metrics']
+                else:
+                    message['_event_metrics'] = message['_event_metrics'].decode("utf-8")
+        except ValueError as e:
+            logging.log(logging.INFO, f"Error deserializing the records :: {e}")
+        reformatted = self.reformat_input_msg_schema(message)
+        yield reformatted
+        # return ','.join([str(row.get(col, '')) for col in ["telephone_number","trouble_report_num","address_id","chronic_flag","chronic_total","line_id_trimmed","port_associated_service","date opened ","data_circuit_id","video_circuit_id"]])
+    def dom_fact_sls_to_prov_walk(self,row):
+        return ','.join([str(row.get(col, '')) for col in ["acct_sk","mon","cust_sk","svc_party_sk","acct_estbd_dt","acct_term_dt"]])
+    def dom_cdi_keys_xref(self,row):
+        return ','.join([str(row.get(col, '')) for col in ["acct_sk","mon","cust_sk","svc_party_sk","acct_estbd_dt","acct_term_dt"]])
+    def model_scores_prospect_hist(self,row):
+        return ','.join([str(row.get(col, '')) for col in ["addr_id","state_cd","model_id","model_version","round_cycle","model_score","model_decile","model_centile","model_segment","model_subsegment","scoring_driver_1","scoring_driver_2","scoring_driver_3","create_date"]])
+    def wln_model_scores(row):
+        return ','.join([str(row.get(col, '')) for col in ["acct_sk","acct_type_cd","create_date","epsilon_cust_id","insert_ts","model_centile","model_decile","model_id","model_score","model_subsegment","model_version","round_cycle","scoring_driver_1","scoring_driver_2","scoring_driver_3"]])
+    
+    def reformat_input_msg_schema(msg): 
+        fmt_msg = {}
+        fmt_msg['timestamp'] = msg['timestamp']
+        fmt_msg['host'] = msg['host']
+        fmt_msg['src'] = msg['src']
+        fmt_msg['ingressTimestamp'] = msg['_event_ingress_ts']
+        fmt_msg['origins'] = [msg['_event_origin']]
+        tags_len = len(msg['_event_tags'])
+        if tags_len > 0:
+            if msg['_event_tags'][0] != "" and msg['_event_tags'][0] != None:
+                fmt_msg['tags'] = msg['_event_tags']
+            else:
+                fmt_msg['tags'] = ['Dummy']
+        else:
+            fmt_msg['tags'] = ['Dummy']
+        #fmt_msg['tags'] = msg['_event_tags']
+        fmt_msg['route'] = 3
+        fmt_msg['fetchTimestamp'] = int(time.time() * 1000)
+        fmt_msg['rawdata'] = msg['rawdata']
+        return fmt_msg
+
+    def process(self, row):
+        # if self.process_name == 'dim_inventory_customer_profiles_norm_v0':
+        #     yield dim_inventory_customer_profiles_norm_v0(row)
+        # elif self.process_name == 'vrepair_ticket_opened_norm_v0':
+        #     yield vrepair_ticket_opened_norm_v0(row)
+        if self.process_name == 'dom_fact_sls_to_prov_walk':
+            yield self.dom_fact_sls_to_prov_walk(row)
+        elif self.process_name == 'dom_cdi_keys_xref':
+            yield self.dom_cdi_keys_xref(row)
+        elif self.process_name == 'model_scores_prospect_hist':
+            yield self.model_scores_prospect_hist(row)
+        elif self.process_name == 'wln_model_scores':
+            yield self.wln_model_scores(row)        
+        else:
+            raise ValueError(f"Unknown process_name: {self.process_name}")
+
+class TemplateOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_argument('--pubsub_subscription_id', dest='pubsub_subscription_id', required=True, help='BigQuery SQL query')
+        parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Output GCS folder path')
+        parser.add_argument('--process_name', dest='process_name', required=True, help='Output GCS folder path')
+
+def run(argv=None):
+    parser = argparse.ArgumentParser()
+    known_args, pipeline_args = parser.parse_known_args(argv)
+    
+    pipeline_options = TemplateOptions(pipeline_args)
+    pipeline_options.view_as(StandardOptions).runner = 'DataflowRunner'
+    
+    with beam.Pipeline(options=pipeline_options) as p:
+        data=p|f'ReadFromPubsub{pipeline_args.pubsub_subscription_id}' >> ReadFromPubSub( subscription=f"projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/wireline_churn_test_topic-sub")
+        decoded_data = data|"Decode" >> beam.ParDo(DecodeAvroRecrds())
+        string_data = decoded_data| "Convert to String" >> beam.Map(lambda x:json.dumps(x))
+        string_data | 'PrintData' >> beam.Map(lambda element: logging.log(logging.INFO, str(element)))
+              #|"log messages" >> beam.Map(lambda x:logging.info(x))
+        # Reading from BigQuery
+        # data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
+        #     query=pipeline_options.query,
+        #     use_standard_sql=True
+        # )
+        # csv_data = data | 'PrepareData' >> beam.ParDo(PrepareData(pipeline_options.process_name))
+        # csv_data | 'PrintData' >> beam.Map(lambda element: logging.log(logging.INFO, str(element)))
+        # csv_data | 'WriteToGCS' >> beam.io.WriteToText(f'{pipeline_options.gcs_folder_path}/output.csv',file_name_suffix='.csv')
+if __name__ == '__main__':
+    run()
