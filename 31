@@ -136,3 +136,20 @@ print_invalid = (pubsub_data.invalid_recs | 'InvalidLogs' >> beam.Map(lambda r: 
 p.run().wait_until_finish()
 
 logging.info(f"Created template at {known_args.template_location}.")
+
+
+
+from apache_beam.transforms.trigger import AfterProcessingTime, AccumulationMode, AfterWatermark
+
+# Apply windowing
+win_str_row = (str_row
+    | 'Add Timestamp' >> beam.ParDo(AddTimestampDoFn())
+    | 'Windowing' >> beam.WindowInto(
+        FixedWindows(60),
+        trigger=beam.transforms.trigger.AfterWatermark(
+            early=beam.transforms.trigger.AfterProcessingTime(10),  # Emit early after 10 seconds
+            late=beam.transforms.trigger.AfterProcessingTime(30)    # Handle late data after 30 seconds
+        ),
+        accumulation_mode=AccumulationMode.DISCARDING
+    )
+)
