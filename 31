@@ -153,3 +153,66 @@ win_str_row = (str_row
         accumulation_mode=AccumulationMode.DISCARDING
     )
 )
+import argparse
+import json
+import logging
+import time
+from io import BytesIO
+import apache_beam as beam
+from apache_beam import pvalue as pvl
+from apache_beam.transforms.window import FixedWindows
+from apache_beam.io import WriteToText
+from apache_beam.io.gcp.pubsub import ReadFromPubSub
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.io.gcp.gcsio import GcsIO
+from apache_beam.transforms.trigger import AfterProcessingTime, AccumulationMode, AfterWatermark
+
+# [Previous code remains the same until pipeline definition]
+
+# Build the pipeline
+pubsub_data = (p 
+    | 'ReadFromPubSub' >> ReadFromPubSub(
+        subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}",
+        with_attributes=True  # Ensure message attributes are preserved
+    )
+    | 'Decode Msg' >> beam.ParDo(DecodeAvroRecords()).with_outputs()
+)
+
+# Convert to KV pairs for proper windowing
+def create_key_value(element):
+    # Create a key based on relevant fields
+    key = f"{element.get('host')}_{element.get('src')}"
+    return (key, element)
+
+windowed_data = (pubsub_data.valid_recs
+    | 'CreateKeyValue' >> beam.Map(create_key_value)
+    | 'Add Timestamp' >> beam.ParDo(AddTimestampDoFn())
+    | 'Window' >> beam.WindowInto(
+        FixedWindows(60),
+        trigger=AfterWatermark(
+            early=AfterProcessingTime(10),
+            late=AfterProcessingTime(30)
+        ),
+        allowed_lateness=60,  # Allow 1 minute of late data
+        accumulation_mode=AccumulationMode.DISCARDING
+    )
+    | 'GroupByKey' >> beam.GroupByKey()
+    | 'Flatten' >> beam.FlatMap(lambda x: x[1])  # Flatten grouped values
+)
+
+# Convert to string and write output
+output_data = (windowed_data
+    | 'DictToStr' >> beam.Map(dict_to_str)
+    | 'WriteToFile' >> WriteToText(
+        known_args.gcs_folder_path,
+        file_name_suffix=".csv",
+        header=headers.get("vrepair_ticket_opened_norm_v0"),
+        num_shards=10  # Adjust based on your data volume
+    )
+)
+
+# Error logging
+print_invalid = (pubsub_data.invalid_recs 
+    | 'InvalidLogs' >> beam.Map(lambda r: logging.error(f"Invalid record: {r}")))
+
+p.run().wait_until_finish()
