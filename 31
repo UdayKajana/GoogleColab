@@ -1,9 +1,13 @@
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.options.pipeline_options import StandardOptions
-import argparse
-import logging
+from apache_beam.io.gcp.pubsub import ReadFromPubSub
+from apache_beam.io import  WriteToPubSub
 
+import argparse
+import time
+import logging
+import json
 logging.getLogger().setLevel(logging.ERROR)
 
 class PrepareData(beam.DoFn):
@@ -13,46 +17,49 @@ class PrepareData(beam.DoFn):
         return ','.join([str(row.get(col, '')) for col in ["ont_activation_date", "data_circuit_id", "circuit_id", "video_circuit_id", "service_type", "address_id", "vision_account_id", "vision_customer_id", "address_type", "line_of_business"]])
     
     def vrepair_ticket_opened_norm_v0(self,element):
-        import avro.io as avro_io
-        import avro.schema
-        from io import BytesIO
-        import time
-        import datetime
-        message: dict = {}
-        raw_schema = """{"namespace": "com.vz.vznet",
-                                           "type": "record",
-                                           "name": "VznetDefault",
-                                           "doc": "Default schema for events in transit",
-                                           "fields": [
-                                           {"name": "timestamp", "type": "long"},
-                                           {"name": "host", "type": "string"},
-                                           {"name": "src",  "type": "string" },
-                                           {"name": "_event_ingress_ts", "type": "long"},
-                                           {"name": "_event_origin", "type": "string"},
-                                           {"name": "_event_tags", "type": {"type": "array", "items": "string"}},
-                                           {"name": "_event_route", "type": "string"},
-                                           {"name": "_event_metrics", "type": ["null", "bytes"], "default": null},
-                                           {"name": "rawdata", "type": "bytes"}
-                                           ]
-                                           }"""
-        try:
-            if isinstance(raw_schema, dict):
-                raw_schema = json.dumps(raw_schema)
-            schema = avro.schema.parse(raw_schema)
-            avro_reader: avro_io.DatumReader = avro_io.DatumReader(schema)
-            avro_message: avro_io.BinaryDecoder = avro_io.BinaryDecoder(BytesIO(element))
-            message = avro_reader.read(avro_message)
-            if schema.name == 'VznetDefault':
-                message['rawdata'] = message['rawdata'].decode("utf-8")
-                if message['_event_metrics'] is None:
-                    message['_event_metrics'] = message['_event_metrics']
-                else:
-                    message['_event_metrics'] = message['_event_metrics'].decode("utf-8")
-        except ValueError as e:
-            logging.log(logging.INFO, f"Error deserializing the records :: {e}")
-        reformatted = self.reformat_input_msg_schema(message)
-        return reformatted
-        # return ','.join([str(row.get(col, '')) for col in ["telephone_number","trouble_report_num","address_id","chronic_flag","chronic_total","line_id_trimmed","port_associated_service","date opened ","data_circuit_id","video_circuit_id"]])
+        import pip
+        for package in pip.get_installed_distributions():
+            logging.log(logging.INFO, package)
+         import avro.io as avro_io
+         import avro.schema
+         from io import BytesIO
+    #     import time
+    #     import datetime
+    #     message: dict = {}
+    #     raw_schema = """{"namespace": "com.vz.vznet",
+    #                                        "type": "record",
+    #                                        "name": "VznetDefault",
+    #                                        "doc": "Default schema for events in transit",
+    #                                        "fields": [
+    #                                        {"name": "timestamp", "type": "long"},
+    #                                        {"name": "host", "type": "string"},
+    #                                        {"name": "src",  "type": "string" },
+    #                                        {"name": "_event_ingress_ts", "type": "long"},
+    #                                        {"name": "_event_origin", "type": "string"},
+    #                                        {"name": "_event_tags", "type": {"type": "array", "items": "string"}},
+    #                                        {"name": "_event_route", "type": "string"},
+    #                                        {"name": "_event_metrics", "type": ["null", "bytes"], "default": null},
+    #                                        {"name": "rawdata", "type": "bytes"}
+    #                                        ]
+    #                                        }"""
+    #     try:
+    #         if isinstance(raw_schema, dict):
+    #             raw_schema = json.dumps(raw_schema)
+    #         schema = avro.schema.parse(raw_schema)
+    #         avro_reader: avro_io.DatumReader = avro_io.DatumReader(schema)
+    #         avro_message: avro_io.BinaryDecoder = avro_io.BinaryDecoder(BytesIO(element))
+    #         message = avro_reader.read(avro_message)
+    #         if schema.name == 'VznetDefault':
+    #             message['rawdata'] = message['rawdata'].decode("utf-8")
+    #             if message['_event_metrics'] is None:
+    #                 message['_event_metrics'] = message['_event_metrics']
+    #             else:
+    #                 message['_event_metrics'] = message['_event_metrics'].decode("utf-8")
+    #     except ValueError as e:
+    #         logging.log(logging.INFO, f"Error deserializing the records :: {e}")
+    #     reformatted = self.reformat_input_msg_schema(message)
+    #     return reformatted
+    #     # return ','.join([str(row.get(col, '')) for col in ["telephone_number","trouble_report_num","address_id","chronic_flag","chronic_total","line_id_trimmed","port_associated_service","date opened ","data_circuit_id","video_circuit_id"]])
     
     def dom_cdi_keys_xref_dom_fact_sls_to_prov_walk(self,row):
         return ','.join([str(row.get(col, '')) for col in ["acct_sk","mon","cust_sk","svc_party_sk","acct_estbd_dt","acct_term_dt"]])
@@ -99,7 +106,7 @@ class PrepareData(beam.DoFn):
 class TemplateOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
-        parser.add_argument('--query', dest='query', required=True, help='BigQuery SQL query')
+        parser.add_argument('--pubsub_subscription_id', dest='pubsub_subscription_id', required=True, help='BigQuery SQL query')
         parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Output GCS folder path')
         parser.add_argument('--process_name', dest='process_name', required=True, help='Output GCS folder path')
 
@@ -119,12 +126,69 @@ def run(argv=None):
             'dim_inventory_customer_profiles_norm_v0':"ont_activation_date,data_circuit_id,circuit_id,video_circuit_id,service_type,address_id,vision_account_id,vision_customer_id,address_type,line_of_business",
             'vrepair_ticket_opened_norm_v0': "telephone_number,trouble_report_num,address_id,chronic_flag,chronic_total,line_id_trimmed,port_associated_service,date_opened,data_circuit_id,video_circuit_id"
         }
-        data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
-            query=pipeline_options.query,
-            use_standard_sql=True
-        )
-        csv_data = data | 'PrepareData' >> beam.ParDo(PrepareData(pipeline_options.process_name))
-        csv_data | 'PrintData' >> beam.Map(lambda element: logging.log(logging.INFO, f'{pipeline_options.gcs_folder_path}/{pipeline_options.process_name}||{headers.get(pipeline_options.process_name)}'))
-        csv_data | 'WriteToGCS' >> beam.io.WriteToText(f'{pipeline_options.gcs_folder_path}/{pipeline_options.process_name}', header= headers.get(pipeline_options.process_name),file_name_suffix='.csv')
+        data=p|f'ReadFromPubsub{pipeline_options.pubsub_subscription_id}' >> ReadFromPubSub( subscription=pipeline_options.pubsub_subscription_id)
+        decoded_data = data | "Decode" >> beam.ParDo(PrepareData(pipeline_options.process_name))
+        string_data=decoded_data | "OCnvert to String" >> beam.Map(lambda x:json.dumps(x))
+        string_data|"log messages" >> beam.Map(lambda x:logging.info(x))
+        writeVrepairToPubsub =(string_data | "writeData" >> WriteToPubSub("projects/vz-it-np-gudv-dev-vzntdo-0/topics/wireline_op"))
+#csv_files = (pubsub_data | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv))
+
+        # data = p | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
+        #     query=pipeline_options.query,
+        #     use_standard_sql=True
+        # )
+        # csv_data = data | 'PrepareData' >> beam.ParDo(PrepareData(pipeline_options.process_name))
+        # csv_data | 'PrintData' >> beam.Map(lambda element: logging.log(logging.INFO, f'{pipeline_options.gcs_folder_path}/{pipeline_options.process_name}||{headers.get(pipeline_options.process_name)}'))
+        # csv_data | 'WriteToGCS' >> beam.io.WriteToText(f'{pipeline_options.gcs_folder_path}/{pipeline_options.process_name}', header= headers.get(pipeline_options.process_name),file_name_suffix='.csv')
 if __name__ == '__main__':
     run()
+
+
+FROM gcr.io/dataflow-templates-base/python39-template-launcher-base
+WORKDIR /template
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libffi-dev \
+    libssl-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+COPY requirements.txt /template/requirements.txt
+COPY pipeline.py /template/pipeline.py
+RUN cat /template/pipeline.py
+ENV DATAFLOW_SERVICE_ACCOUNT="sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com"
+ENV FLEX_TEMPLATE_PYTHON_PY_FILE="/template/pipeline.py"
+ENV FLEX_TEMPLATE_PYTHON_SETUP_FILE=""
+ENV FLEX_TEMPLATE_PYTHON_OPTIONS="--runner=DataflowRunner"
+
+
+# Build the Docker image
+gcloud builds submit \
+--tag us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env1:V1 .
+
+# Build the Flex Template
+gcloud dataflow flex-template build gs://vznet-test/wireline_churn_test/templates/template_vrepair_ticket_opened_norm_v0.json     \
+--image us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/pipeline_env1:V1     \
+--sdk-language "PYTHON"     \
+--metadata-file metadata.json
+
+# Run the Flex Template
+gcloud dataflow flex-template run "vrepair-ticket-opened_norm_v0-pubsub-pipeline-$(date +%Y%m%d-%H%M%S)"     \
+--template-file-gcs-location gs://vznet-test/wireline_churn_test/templates/template_vrepair_ticket_opened_norm_v0.json     \
+--project vz-it-np-gudv-dev-vzntdo-0     \
+--region us-east4     \
+--parameters pubsub_subscription_id="projects/vz-it-np-gudv-dev-vzntdo-0/subscriptions/wireline_churn_test_topic-sub"     \
+--parameters gcs_folder_path="gs://vznet-test/wireline_churn_test/tmp/"     \
+--parameters network="shared-np-east"     \
+--parameters process_name="vrepair_ticket_opened_norm_v0"  \
+--parameters subnetwork="https://www.googleapis.com/compute/v1/projects/vz-it-np-exhv-sharedvpc-228116/regions/us-east4/subnetworks/shared-np-east-green-subnet-2"     \
+--parameters service_account_email="sa-dev-gudv-app-vzntdo-0@vz-it-np-gudv-dev-vzntdo-0.iam.gserviceaccount.com"     \
+--num-workers 2     \
+--max-workers 2     \
+--worker-machine-type n2-standard-2     \
+--disable-public-ips     \
+--temp-location gs://vznet-test/wireline_churn_test/tmp/     \
+--dataflow-kms-key projects/vz-it-np-d0sv-vsadkms-0/locations/us-east4/keyRings/vz-it-np-kr-aid/cryptoKeys/vz-it-np-kms-gudv
+
+
+ fastavro==1.7.0
+avro==1.12.0
