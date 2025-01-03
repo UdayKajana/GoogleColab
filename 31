@@ -107,69 +107,6 @@ options = {
 
 pipeline_options = PipelineOptions.from_dictionary(options)
 p = beam.Pipeline(options=pipeline_options)
-
-# Build the pipeline
-pubsub_data = (p 
-    | 'ReadFromPubSub' >> ReadFromPubSub(subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}")
-    | 'Decode Msg' >> beam.ParDo(DecodeAvroRecords()).with_outputs()
-)
-
-str_row = pubsub_data.valid_recs | 'DictToStr' >> beam.Map(dict_to_str)
-
-win_str_row = (str_row
-    | 'Add Timestamp' >> beam.ParDo(AddTimestampDoFn())
-    | 'Windowing' >> beam.WindowInto(FixedWindows(60))
-)
-
-op = (win_str_row 
-    | 'Write-To-File' >> WriteToText(
-        known_args.gcs_folder_path,
-        file_name_suffix=".csv",
-        header=headers.get("vrepair_ticket_opened_norm_v0")
-    )
-)
-
-print_row = (str_row | 'Logs' >> beam.Map(lambda r: logging.info(r)))
-print_invalid = (pubsub_data.invalid_recs | 'InvalidLogs' >> beam.Map(lambda r: logging.info(r)))
-
-# Run the pipeline
-p.run().wait_until_finish()
-
-logging.info(f"Created template at {known_args.template_location}.")
-
-
-
-from apache_beam.transforms.trigger import AfterProcessingTime, AccumulationMode, AfterWatermark
-
-# Apply windowing
-win_str_row = (str_row
-    | 'Add Timestamp' >> beam.ParDo(AddTimestampDoFn())
-    | 'Windowing' >> beam.WindowInto(
-        FixedWindows(60),
-        trigger=beam.transforms.trigger.AfterWatermark(
-            early=beam.transforms.trigger.AfterProcessingTime(10),  # Emit early after 10 seconds
-            late=beam.transforms.trigger.AfterProcessingTime(30)    # Handle late data after 30 seconds
-        ),
-        accumulation_mode=AccumulationMode.DISCARDING
-    )
-)
-import argparse
-import json
-import logging
-import time
-from io import BytesIO
-import apache_beam as beam
-from apache_beam import pvalue as pvl
-from apache_beam.transforms.window import FixedWindows
-from apache_beam.io import WriteToText
-from apache_beam.io.gcp.pubsub import ReadFromPubSub
-from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.io.gcp.gcsio import GcsIO
-from apache_beam.transforms.trigger import AfterProcessingTime, AccumulationMode, AfterWatermark
-
-# [Previous code remains the same until pipeline definition]
-
-# Build the pipeline
 pubsub_data = (p 
     | 'ReadFromPubSub' >> ReadFromPubSub(
         subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}",
@@ -183,7 +120,19 @@ def create_key_value(element):
     # Create a key based on relevant fields
     key = f"{element.get('host')}_{element.get('src')}"
     return (key, element)
-
+import argparse
+import json
+import logging
+import time
+from io import BytesIO
+import apache_beam as beam
+from apache_beam import pvalue as pvl
+from apache_beam.transforms.window import FixedWindows
+from apache_beam.io import WriteToText
+from apache_beam.io.gcp.pubsub import ReadFromPubSub
+from apache_beam.options.pipeline_options import PipelineOptions
+from apache_beam.io.gcp.gcsio import GcsIO
+from apache_beam.transforms.trigger import AfterProcessingTime, AccumulationMode, AfterWatermark
 windowed_data = (pubsub_data.valid_recs
     | 'CreateKeyValue' >> beam.Map(create_key_value)
     | 'Add Timestamp' >> beam.ParDo(AddTimestampDoFn())
@@ -216,3 +165,92 @@ print_invalid = (pubsub_data.invalid_recs
     | 'InvalidLogs' >> beam.Map(lambda r: logging.error(f"Invalid record: {r}")))
 
 p.run().wait_until_finish()
+# # Build the pipeline
+# pubsub_data = (p 
+#     | 'ReadFromPubSub' >> ReadFromPubSub(subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}")
+#     | 'Decode Msg' >> beam.ParDo(DecodeAvroRecords()).with_outputs()
+# )
+
+# str_row = pubsub_data.valid_recs | 'DictToStr' >> beam.Map(dict_to_str)
+
+# from apache_beam.transforms.trigger import AfterProcessingTime, AccumulationMode, AfterWatermark
+
+# # Apply windowing
+# win_str_row = (str_row
+#     | 'Add Timestamp' >> beam.ParDo(AddTimestampDoFn())
+#     | 'Windowing' >> beam.WindowInto(
+#         FixedWindows(60),
+#         trigger=beam.transforms.trigger.AfterWatermark(
+#             early=beam.transforms.trigger.AfterProcessingTime(10),
+#             late=beam.transforms.trigger.AfterProcessingTime(30)
+#         ),
+#         accumulation_mode=AccumulationMode.DISCARDING
+#     )
+# )
+
+# op = (win_str_row 
+#     | 'Write-To-File' >> WriteToText(
+#         known_args.gcs_folder_path,
+#         file_name_suffix=".csv",
+#         header=headers.get("vrepair_ticket_opened_norm_v0")
+#     )
+# )
+
+# print_row = (str_row | 'Logs' >> beam.Map(lambda r: logging.info(r)))
+# print_invalid = (pubsub_data.invalid_recs | 'InvalidLogs' >> beam.Map(lambda r: logging.info(r)))
+
+# # Run the pipeline
+# p.run().wait_until_finish()
+
+# logging.info(f"Created template at {known_args.template_location}.")
+
+
+INFO:apache_beam.typehints.native_type_compatibility:Converting string literal type hint to Any: "PubsubMessage"
+Traceback (most recent call last):
+  File "/home/udayka/model_scores_prospect_hist/vrepair_ticket_opened_norm_v1.py", line 153, in <module>
+    output_data = (windowed_data
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pvalue.py", line 138, in __or__
+    return self.pipeline.apply(ptransform, self)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 681, in apply
+    return self.apply(
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 692, in apply
+    return self.apply(transform, pvalueish)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 754, in apply
+    pvalueish_result = self.runner.apply(transform, pvalueish, self._options)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 191, in apply
+    return self.apply_PTransform(transform, input, options)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 195, in apply_PTransform
+    return transform.expand(input)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/textio.py", line 895, in expand
+    return pcoll | Write(self._sink)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pvalue.py", line 138, in __or__
+    return self.pipeline.apply(ptransform, self)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 754, in apply
+    pvalueish_result = self.runner.apply(transform, pvalueish, self._options)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 191, in apply
+    return self.apply_PTransform(transform, input, options)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 195, in apply_PTransform
+    return transform.expand(input)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/iobase.py", line 1070, in expand
+    return pcoll | WriteImpl(self.sink)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pvalue.py", line 138, in __or__
+    return self.pipeline.apply(ptransform, self)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 754, in apply
+    pvalueish_result = self.runner.apply(transform, pvalueish, self._options)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 191, in apply
+    return self.apply_PTransform(transform, input, options)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 195, in apply_PTransform
+    return transform.expand(input)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/iobase.py", line 1140, in expand
+    keyed_pcoll
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pvalue.py", line 138, in __or__
+    return self.pipeline.apply(ptransform, self)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 754, in apply
+    pvalueish_result = self.runner.apply(transform, pvalueish, self._options)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 191, in apply
+    return self.apply_PTransform(transform, input, options)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 195, in apply_PTransform
+    return transform.expand(input)
+  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/transforms/core.py", line 3254, in expand
+    raise ValueError(
+ValueError: GroupByKey cannot be applied to an unbounded PCollection with global windowing and a default trigger
