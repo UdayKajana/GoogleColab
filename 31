@@ -13,21 +13,84 @@ from apache_beam.io import WriteToText
 from apache_beam.io.gcp.pubsub import ReadFromPubSub
 from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.transforms import window
+from apache_beam.transforms import trigger
 
-# Rest of the imports and argument parsing remain the same...
+# Set up logging
+logging.getLogger().setLevel(logging.INFO)
+
+# Pipeline options
+class TemplateOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_value_provider_argument('--params', type=str)
+
+# Command line argument parser
+parser = argparse.ArgumentParser()
+parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
+parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
+parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
+parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
+parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
+parser.add_argument('--template_location', dest='template_location', required=True, help='GCS bucket path to save template')
+parser.add_argument('--input_sub', dest='input_sub', required=True, help='Input Subscription')
+parser.add_argument('--sdk_container_image', dest='sdk_container_image',
+                    default='us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/beamredis:1.0.0',
+                    required=False, help='sdk_container_image location')
+parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='GCS output folder path')
+
+known_args, beam_args = parser.parse_known_args()
 
 class DecodeAvroRecords(beam.DoFn):
     def process(self, element):
-        # Your existing decode logic remains the same...
-        # At the end, yield the reformatted message
+        def reformat_input_msg_schema(msg):
+            fmt_msg = {
+                'timestamp': msg['timestamp'],
+                'host': msg['host'],
+                'src': msg['src'],
+                'ingressTimestamp': msg['_event_ingress_ts'],
+                'origins': [msg['_event_origin']],
+                'tags': msg['_event_tags'],
+                'route': 3,
+                'fetchTimestamp': int(time.time() * 1000),
+                'rawdata': msg['rawdata']
+            }
+            return fmt_msg
+
+        raw_schema = """{"namespace": "com.vz.vznet",
+                        "type": "record",
+                        "name": "VznetDefault",
+                        "doc": "Default schema for events in transit",
+                        "fields": [
+                            {"name": "timestamp", "type": "long"},
+                            {"name": "host", "type": "string"},
+                            {"name": "src",  "type": "string" },
+                            {"name": "_event_ingress_ts", "type": "long"},
+                            {"name": "_event_origin", "type": "string"},
+                            {"name": "_event_tags", "type": {"type": "array", "items": "string"}},
+                            {"name": "_event_route", "type": "string"},
+                            {"name": "_event_metrics", "type": ["null", "bytes"], "default": null},
+                            {"name": "rawdata", "type": "bytes"}
+                        ]}"""
         try:
-            # Existing decoding logic...
+            schema = avro.schema.Parse(raw_schema)
+            avro_reader = avro_io.DatumReader(schema)
+            avro_message = avro_io.BinaryDecoder(BytesIO(element))
+            message = avro_reader.read(avro_message)
+            
+            if schema.name == 'VznetDefault':
+                message['rawdata'] = message['rawdata'].decode("utf-8")
+                if message['_event_metrics'] is None:
+                    message['_event_metrics'] = message['_event_metrics']
+                else:
+                    message['_event_metrics'] = message['_event_metrics'].decode("utf-8")
+                    
             reformatted = reformat_input_msg_schema(message)
-            logging.info(f"TEMP_LOG: reformatted={reformatted}")
+            logging.info(f"Successfully decoded message: {reformatted}")
             yield pvl.TaggedOutput("valid_recs", reformatted)
+            
         except Exception as e:
             logging.error(f"Error in Decoding::{element}")
-            logging.error(e)
+            logging.error(f"Exception details: {e}")
             yield pvl.TaggedOutput("invalid_recs", element)
 
 def dict_to_str(row):
@@ -35,61 +98,88 @@ def dict_to_str(row):
         raw_data = json.loads(row['rawdata'])
         lst = list(raw_data.values())
         row_str = ",".join([str(i) for i in lst])
+        logging.info(f"Converted row to string: {row_str}")
         return row_str
     except Exception as e:
         logging.error(f"Error in dict_to_str: {e}")
+        logging.error(f"Problematic row: {row}")
         return None
 
 def format_window_fn(window_info):
+    """Format the window info for file naming"""
     return f"{window_info.start.strftime('%Y%m%d-%H%M')}"
 
-# Pipeline definition
-pipeline_options = PipelineOptions.from_dictionary(options)
-p = beam.Pipeline(options=pipeline_options)
+def run():
+    # Pipeline options
+    options = {
+        'project': known_args.project,
+        'runner': known_args.runner,
+        'region': known_args.region,
+        'staging_location': known_args.staging_location,
+        'temp_location': known_args.temp_location,
+        'template_location': known_args.template_location,
+        'save_main_session': True,
+        'streaming': True,
+        'sdk_container_image': known_args.sdk_container_image,
+        'sdk_location': 'container'
+    }
 
-# Read from PubSub
-pubsub_data = (p 
-    | f'ReadFromPubsub {known_args.input_sub}' 
-    >> ReadFromPubSub(subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}"))
+    # Column headers for output CSV
+    headers = {
+        'vrepair_ticket_opened_norm_v0': "ont_activation_date,data_circuit_id,circuit_id,video_circuit_id,service_type,address_id,vision_account_id,vision_customer_id,address_type,line_of_business"
+    }
 
-# Decode messages
-decoded_result = pubsub_data | 'Decode Msg' >> beam.ParDo(DecodeAvroRecords())
+    pipeline_options = PipelineOptions.from_dictionary(options)
+    
+    # Create and run pipeline
+    with beam.Pipeline(options=pipeline_options) as p:
+        # Read from PubSub
+        pubsub_data = (p 
+            | f'ReadFromPubsub {known_args.input_sub}' 
+            >> ReadFromPubSub(
+                subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}"
+            ))
 
-# Access the valid records
-valid_records = decoded_result[DecodeAvroRecords.valid_recs]
+        # Decode messages
+        decoded_result = pubsub_data | 'Decode Msg' >> beam.ParDo(DecodeAvroRecords())
 
-# Debug prints for valid records
-valid_records | 'Print Valid Data' >> beam.Map(
-    lambda element: logging.info(f"Valid Data: {element}")
-)
+        # Process valid records
+        valid_records = decoded_result[DecodeAvroRecords.valid_recs]
 
-# Window the data into 1-minute fixed windows
-windowed_data = (valid_records 
-    | "Window" >> beam.WindowInto(
-        window.FixedWindows(60),  # 60 seconds
-        trigger=trigger.AfterWatermark(),
-        accumulation_mode=trigger.AccumulationMode.DISCARDING
-    )
-)
+        # Add debug printing
+        valid_records | 'Print Valid Data' >> beam.Map(
+            lambda element: logging.info(f"Processing valid record: {element}")
+        )
 
-# Convert to CSV string format
-str_rows = windowed_data | "DictToStr" >> beam.Map(dict_to_str)
+        # Window the data into 1-minute fixed windows
+        windowed_data = (valid_records 
+            | "Window" >> beam.WindowInto(
+                window.FixedWindows(60),  # 60 seconds
+                trigger=trigger.AfterWatermark(),
+                accumulation_mode=trigger.AccumulationMode.DISCARDING
+            ))
 
-# Write to GCS with windowed file names
-_ = (str_rows 
-    | "Write-To-File" >> WriteToText(
-        known_args.gcs_folder_path,
-        file_name_suffix=".csv",
-        header=headers.get("vrepair_ticket_opened_norm_v0"),
-        window_fn=format_window_fn
-    )
-)
+        # Convert to CSV string format
+        str_rows = windowed_data | "DictToStr" >> beam.Map(dict_to_str)
 
-# Print invalid records for debugging
-invalid_records = decoded_result[DecodeAvroRecords.invalid_recs]
-invalid_records | "Print Invalid Records" >> beam.Map(
-    lambda element: logging.error(f"Invalid record: {element}")
-)
+        # Filter out None values from failed conversions
+        valid_str_rows = str_rows | "FilterNone" >> beam.Filter(lambda x: x is not None)
 
-result = p.run()
-print(f'Created template at {known_args.template_location}.')
+        # Write to GCS with windowed file names
+        _ = (valid_str_rows 
+            | "Write-To-File" >> WriteToText(
+                known_args.gcs_folder_path,
+                file_name_suffix=".csv",
+                header=headers.get("vrepair_ticket_opened_norm_v0"),
+                window_fn=format_window_fn
+            ))
+
+        # Process and log invalid records
+        invalid_records = decoded_result[DecodeAvroRecords.invalid_recs]
+        invalid_records | "Log Invalid Records" >> beam.Map(
+            lambda element: logging.error(f"Invalid record found: {element}")
+        )
+
+if __name__ == '__main__':
+    run()
+    print(f'Created template at {known_args.template_location}.')
