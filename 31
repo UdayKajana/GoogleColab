@@ -18,27 +18,43 @@ from apache_beam.transforms import trigger
 # Set up logging
 logging.getLogger().setLevel(logging.INFO)
 
-# Pipeline options
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
+    parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
+    parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
+    parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
+    parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
+    parser.add_argument('--template_location', dest='template_location', required=True, help='GCS bucket path to save template')
+    parser.add_argument('--input_sub', dest='input_sub', required=True, help='Input Subscription')
+    parser.add_argument('--sdk_container_image', dest='sdk_container_image',
+                        default='us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/beamredis:1.0.0',
+                        required=False, help='sdk_container_image location')
+    parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='GCS output folder path')
+    
+    return parser.parse_known_args()
+
+def get_pipeline_options(known_args):
+    """Create pipeline options dictionary."""
+    options = {
+        'project': known_args.project,
+        'runner': known_args.runner,
+        'region': known_args.region,
+        'staging_location': known_args.staging_location,
+        'temp_location': known_args.temp_location,
+        'template_location': known_args.template_location,
+        'save_main_session': True,
+        'streaming': True,
+        'sdk_container_image': known_args.sdk_container_image,
+        'sdk_location': 'container'
+    }
+    return options
+
 class TemplateOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
         parser.add_value_provider_argument('--params', type=str)
-
-# Command line argument parser
-parser = argparse.ArgumentParser()
-parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
-parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
-parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
-parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
-parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
-parser.add_argument('--template_location', dest='template_location', required=True, help='GCS bucket path to save template')
-parser.add_argument('--input_sub', dest='input_sub', required=True, help='Input Subscription')
-parser.add_argument('--sdk_container_image', dest='sdk_container_image',
-                    default='us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/beamredis:1.0.0',
-                    required=False, help='sdk_container_image location')
-parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='GCS output folder path')
-
-known_args, beam_args = parser.parse_known_args()
 
 class DecodeAvroRecords(beam.DoFn):
     def process(self, element):
@@ -109,77 +125,77 @@ def format_window_fn(window_info):
     """Format the window info for file naming"""
     return f"{window_info.start.strftime('%Y%m%d-%H%M')}"
 
-def run():
-    # Pipeline options
-    options = {
-        'project': known_args.project,
-        'runner': known_args.runner,
-        'region': known_args.region,
-        'staging_location': known_args.staging_location,
-        'temp_location': known_args.temp_location,
-        'template_location': known_args.template_location,
-        'save_main_session': True,
-        'streaming': True,
-        'sdk_container_image': known_args.sdk_container_image,
-        'sdk_location': 'container'
-    }
-
+def run(known_args, pipeline_args):
+    """Main pipeline execution function."""
+    # Get pipeline options
+    options = get_pipeline_options(known_args)
+    pipeline_options = PipelineOptions.from_dictionary(options)
+    
     # Column headers for output CSV
     headers = {
         'vrepair_ticket_opened_norm_v0': "ont_activation_date,data_circuit_id,circuit_id,video_circuit_id,service_type,address_id,vision_account_id,vision_customer_id,address_type,line_of_business"
     }
 
-    pipeline_options = PipelineOptions.from_dictionary(options)
-    
-    # Create and run pipeline
-    with beam.Pipeline(options=pipeline_options) as p:
-        # Read from PubSub
-        pubsub_data = (p 
-            | f'ReadFromPubsub {known_args.input_sub}' 
-            >> ReadFromPubSub(
-                subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}"
-            ))
+    # Create pipeline
+    p = beam.Pipeline(options=pipeline_options)
 
-        # Decode messages
-        decoded_result = pubsub_data | 'Decode Msg' >> beam.ParDo(DecodeAvroRecords())
+    # Read from PubSub
+    pubsub_data = (p 
+        | f'ReadFromPubsub {known_args.input_sub}' 
+        >> ReadFromPubSub(
+            subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}"
+        ))
 
-        # Process valid records
-        valid_records = decoded_result[DecodeAvroRecords.valid_recs]
+    # Decode messages
+    decoded_result = pubsub_data | 'Decode Msg' >> beam.ParDo(DecodeAvroRecords())
 
-        # Add debug printing
-        valid_records | 'Print Valid Data' >> beam.Map(
-            lambda element: logging.info(f"Processing valid record: {element}")
-        )
+    # Process valid records
+    valid_records = decoded_result[DecodeAvroRecords.valid_recs]
 
-        # Window the data into 1-minute fixed windows
-        windowed_data = (valid_records 
-            | "Window" >> beam.WindowInto(
-                window.FixedWindows(60),  # 60 seconds
-                trigger=trigger.AfterWatermark(),
-                accumulation_mode=trigger.AccumulationMode.DISCARDING
-            ))
+    # Add debug printing
+    _ = valid_records | 'Print Valid Data' >> beam.Map(
+        lambda element: logging.info(f"Processing valid record: {element}")
+    )
 
-        # Convert to CSV string format
-        str_rows = windowed_data | "DictToStr" >> beam.Map(dict_to_str)
+    # Window the data into 1-minute fixed windows
+    windowed_data = (valid_records 
+        | "Window" >> beam.WindowInto(
+            window.FixedWindows(60),  # 60 seconds
+            trigger=trigger.AfterWatermark(),
+            accumulation_mode=trigger.AccumulationMode.DISCARDING
+        ))
 
-        # Filter out None values from failed conversions
-        valid_str_rows = str_rows | "FilterNone" >> beam.Filter(lambda x: x is not None)
+    # Convert to CSV string format
+    str_rows = windowed_data | "DictToStr" >> beam.Map(dict_to_str)
 
-        # Write to GCS with windowed file names
-        _ = (valid_str_rows 
-            | "Write-To-File" >> WriteToText(
-                known_args.gcs_folder_path,
-                file_name_suffix=".csv",
-                header=headers.get("vrepair_ticket_opened_norm_v0"),
-                window_fn=format_window_fn
-            ))
+    # Filter out None values from failed conversions
+    valid_str_rows = str_rows | "FilterNone" >> beam.Filter(lambda x: x is not None)
 
-        # Process and log invalid records
-        invalid_records = decoded_result[DecodeAvroRecords.invalid_recs]
-        invalid_records | "Log Invalid Records" >> beam.Map(
-            lambda element: logging.error(f"Invalid record found: {element}")
-        )
+    # Write to GCS with windowed file names
+    _ = (valid_str_rows 
+        | "Write-To-File" >> WriteToText(
+            known_args.gcs_folder_path,
+            file_name_suffix=".csv",
+            header=headers.get("vrepair_ticket_opened_norm_v0"),
+            window_fn=format_window_fn
+        ))
+
+    # Process and log invalid records
+    invalid_records = decoded_result[DecodeAvroRecords.invalid_recs]
+    _ = invalid_records | "Log Invalid Records" >> beam.Map(
+        lambda element: logging.error(f"Invalid record found: {element}")
+    )
+
+    # Run the pipeline
+    result = p.run()
+    return result
+
+def main():
+    """Main entry point."""
+    known_args, pipeline_args = parse_arguments()
+    result = run(known_args, pipeline_args)
+    print(f'Created template at {known_args.template_location}.')
+    return result
 
 if __name__ == '__main__':
-    run()
-    print(f'Created template at {known_args.template_location}.')
+    main()
