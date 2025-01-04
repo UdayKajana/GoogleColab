@@ -1,122 +1,189 @@
-windowed_data = (pubsub_data.valid_recs
-    | 'CreateKeyValue' >> beam.Map(create_key_value)
-    | 'Add Timestamp' >> beam.ParDo(AddTimestampDoFn())
-    | 'Window' >> beam.WindowInto(
-        FixedWindows(60),  # Ensure that this is properly applied.
-        trigger=AfterWatermark(
-            early=AfterProcessingTime(10),
-            late=AfterProcessingTime(30)
-        ),
-        allowed_lateness=60,  # This is okay but review logic if needed.
-        accumulation_mode=AccumulationMode.DISCARDING
-    )
-    | 'GroupByKey' >> beam.GroupByKey()  # This should function without issue now.
-    | 'Flatten' >> beam.FlatMap(lambda x: x[1])  # Flattening the values.
-)
-
-
-
-
-
-
-
-
-
 import argparse
 import json
 import logging
 import time
 from io import BytesIO
+
 import apache_beam as beam
-from apache_beam import pvalue as pvl
-from apache_beam.transforms.window import FixedWindows
+import apache_beam.pvalue as pvl
+import avro
+import avro.io as avro_io
+import avro.schema
 from apache_beam.io import WriteToText
 from apache_beam.io.gcp.pubsub import ReadFromPubSub
 from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.io.gcp.gcsio import GcsIO
 
-# Set logging level
-logging.getLogger().setLevel(logging.INFO)
 
+# logging.getLogger().setLevel(logging.ERROR)
 class TemplateOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
         parser.add_value_provider_argument('--params', type=str)
 
-# Parsing command-line arguments
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
 parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
 parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
 parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
 parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
-parser.add_argument('--template_location', dest='template_location', required=True, help='GCS bucket path to save template')
+parser.add_argument('--template_location', dest='template_location', required=True,help='GCS bucket path to save template')
 parser.add_argument('--input_sub', dest='input_sub', required=True, help='Input Subscription')
 parser.add_argument('--sdk_container_image', dest='sdk_container_image',
                     default='us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/beamredis:1.0.0',
-                    required=False, help='SDK container image location')
-parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='GCS folder path to write data')
-known_args, beam_args = parser.parse_known_args()
+                    required=False, help='sdk_container_image location')
+parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='Input Subscription')
+known_args,beam_args = parser.parse_known_args()
 
-# Decode Avro records
+def process_avro_to_csv(message_data):
+    logging.log(logging.INFO, str(message_data))
+    from io import BytesIO
+    import io
+    import fastavro
+    import csv
+    import uuid
+    try:
+        logging.log(logging.INFO, str(BytesIO))
+        # Read Avro data
+        bytes_reader = BytesIO(message_data)
+        avro_reader = fastavro.reader(bytes_reader)
+
+        # Extract records
+        records = [record for record in avro_reader]
+        if not records:
+            logging.warning("No records found in the Avro message.")
+            return None
+
+        # Convert records to CSV format
+        fieldnames = list(records[0].keys())
+        csv_buffer = io.StringIO()
+        writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(records)
+
+        # Generate a unique filename
+        unique_id = uuid.uuid4()
+        filename = f"message_{unique_id}.csv"
+
+        logging.info(f"Processed message into file: {filename}")
+        return filename, csv_buffer.getvalue()
+    except Exception as e:
+        logging.error(f"Error processing Avro message: {e}")
+        return None
+
+def write_csv_to_gcs(element, gcs_location):
+    
+    from apache_beam.io.gcp.gcsio import GcsIO
+    try:
+        filename, csv_data = element
+        if not csv_data:
+            logging.warning(f"No CSV data to write for {filename}. Skipping.")
+            return
+        # Define GCS file path
+        gcs_path = f"{gcs_location}/{filename}"
+        logging.log(logging.INFO, gcs_path)
+        # Write CSV data to GCS
+        gcs_io = GcsIO()
+        with gcs_io.open(gcs_path, 'w') as gcs_file:
+            gcs_file.write(csv_data.encode("utf-8"))
+
+        logging.info(f"Successfully wrote {filename} to GCS: {gcs_path}")
+    except Exception as e:
+        logging.error(f"Error writing CSV to GCS: {e}")
+
+
 class DecodeAvroRecords(beam.DoFn):
+
     def process(self, element):
         def reformat_input_msg_schema(msg):
-            return {
-                'timestamp': msg.get('timestamp'),
-                'host': msg.get('host'),
-                'src': msg.get('src'),
-                'ingressTimestamp': msg.get('_event_ingress_ts'),
-                'origins': [msg.get('_event_origin')],
-                'tags': msg.get('_event_tags'),
-                'route': 3,
-                'fetchTimestamp': int(time.time() * 1000),
-                'rawdata': msg.get('rawdata'),
-            }
-        
-        raw_schema = """{
-            "namespace": "com.vz.vznet",
-            "type": "record",
-            "name": "VznetDefault",
-            "doc": "Default schema for events in transit",
-            "fields": [
-                {"name": "timestamp", "type": "long"},
-                {"name": "host", "type": "string"},
-                {"name": "src", "type": "string"},
-                {"name": "_event_ingress_ts", "type": "long"},
-                {"name": "_event_origin", "type": "string"},
-                {"name": "_event_tags", "type": {"type": "array", "items": "string"}},
-                {"name": "rawdata", "type": "bytes"}
-            ]
-        }"""
+            fmt_msg = {}
+            fmt_msg['timestamp'] = msg['timestamp']
+            fmt_msg['host'] = msg['host']
+            fmt_msg['src'] = msg['src']
+            fmt_msg['ingressTimestamp'] = msg['_event_ingress_ts']
+            fmt_msg['origins'] = [msg['_event_origin']]
+            fmt_msg['tags'] = msg['_event_tags']
+            fmt_msg['route'] = 3
+            fmt_msg['fetchTimestamp'] = int(time.time()*1000)
+            fmt_msg['rawdata'] = msg['rawdata']
+            return fmt_msg
+
+        message: dict = {}
+        raw_schema = """{"namespace": "com.vz.vznet",
+                                           "type": "record",
+                                           "name": "VznetDefault",
+                                           "doc": "Default schema for events in transit",
+                                           "fields": [
+                                           {"name": "timestamp", "type": "long"},
+                                           {"name": "host", "type": "string"},
+                                           {"name": "src",  "type": "string" },
+                                           {"name": "_event_ingress_ts", "type": "long"},
+                                           {"name": "_event_origin", "type": "string"},
+                                           {"name": "_event_tags", "type": {"type": "array", "items": "string"}},
+                                           {"name": "_event_route", "type": "string"},
+                                           {"name": "_event_metrics", "type": ["null", "bytes"], "default": null},
+                                           {"name": "rawdata", "type": "bytes"}
+                                           ]
+                                           }"""
         try:
-            schema = avro.schema.parse(raw_schema)
-            avro_reader = avro.io.DatumReader(schema)
-            avro_decoder = avro.io.BinaryDecoder(BytesIO(element))
-            message = avro_reader.read(avro_decoder)
-            message['rawdata'] = message['rawdata'].decode("utf-8")
-            reformatted_message = reformat_input_msg_schema(message)
-            yield pvl.TaggedOutput("valid_recs", reformatted_message)
+            # logging.info(f"TEMP_LOG: Inside decode dofn-3")
+            if isinstance(raw_schema, dict):
+                raw_schema = json.dumps(raw_schema)
+            try:
+                schema = avro.schema.parse(raw_schema)
+            except:
+                schema = avro.schema.Parse(raw_schema)
+            avro_reader: avro_io.DatumReader = avro_io.DatumReader(schema)
+            avro_message: avro_io.BinaryDecoder = avro_io.BinaryDecoder(BytesIO(element))
+            message = avro_reader.read(avro_message)
+            if schema.name == 'VznetDefault':
+                message['rawdata'] = message['rawdata'].decode("utf-8")
+                if message['_event_metrics'] is None:
+                    message['_event_metrics'] = message['_event_metrics']
+                else:
+                    message['_event_metrics'] = message['_event_metrics'].decode("utf-8")
+            reformatted = reformat_input_msg_schema(message)
+            logging.info(f"TEMP_LOG: reformatted={reformatted}")
+            yield pvl.TaggedOutput("valid_recs", reformatted)
         except Exception as e:
-            logging.error(f"Error decoding Avro message: {e}")
+            logging.debug(f"Error in Decoding::{element}")
+            logging.debug(e)
             yield pvl.TaggedOutput("invalid_recs", element)
 
-# Add timestamp to records
-class AddTimestampDoFn(beam.DoFn):
-    def process(self, element):
-        timestamp = element.get('timestamp', int(time.time()))
-        yield beam.window.TimestampedValue(element, timestamp)
 
-# Convert dictionary to CSV-like string
 def dict_to_str(row):
-    return ",".join([str(value) for value in row.values()])
+    lst = list(json.loads(row['rawdata']).values())
+    row_str = ",".join([str(i) for i in lst])
+    return row_str
 
-# Define headers for the output file
-headers = {
-    'vrepair_ticket_opened_norm_v0': "telephone_number,trouble_report_num,address_id,chronic_flag,chronic_total,line_id_trimmed,port_associated_service,date_opened,data_circuit_id,video_circuit_id"
-}
+def parse_avro_message(message):
+    from io import BytesIO
+    import fastavro
+    table_columns = ["telephone_number",
+                     "trouble_report_num",
+                     "address_id",
+                     "chronic_flag",
+                     "chronic_total",
+                     "line_id_trimmed",
+                     "port_associated_service",
+                     "date_opened",
+                     "data_circuit_id",
+                     "video_circuit_id"]
+    try:
+        logging.info("TEMP_LOG:Inside parse_avro_message function")
+        # Read Avro data
+        bytes_reader = BytesIO(message)
+        avro_reader = fastavro.reader(bytes_reader)
+        rows = []
+        for record in avro_reader:
+            spanner_row = {column: record.get(column, None) for column in table_columns}
+            rows.append(spanner_row)
+        logging.info(f"TEMP_LOG:rows={rows}")
+        return rows
+    except Exception as e:
+        logging.error(f"Error parsing Avro message: {e}")
+        return []
 
-# Define pipeline options
 options = {
     'project': known_args.project,
     'runner': known_args.runner,
@@ -126,214 +193,28 @@ options = {
     'template_location': known_args.template_location,
     'save_main_session': True,
     'streaming': True,
-    'sdk_container_image': known_args.sdk_container_image
+    'sdk_container_image': known_args.sdk_container_image,
+    'sdk_location': 'container'
 }
-
+headers = {
+    'vrepair_ticket_opened_norm_v0': "telephone_number,trouble_report_num,address_id,chronic_flag,chronic_total,line_id_trimmed,port_associated_service,date_opened,data_circuit_id,video_circuit_id"
+}
 pipeline_options = PipelineOptions.from_dictionary(options)
 p = beam.Pipeline(options=pipeline_options)
-pubsub_data = (p 
-    | 'ReadFromPubSub' >> ReadFromPubSub(
-        subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}",
-        with_attributes=True  # Ensure message attributes are preserved
-    )
-    | 'Decode Msg' >> beam.ParDo(DecodeAvroRecords()).with_outputs()
-)
+pubsub_data=p|f'ReadFromPubsub {known_args.input_sub}' >> ReadFromPubSub(subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}")
+decoded_pubsub_data = pubsub_data|'Decode Msg' >> beam.ParDo(DecodeAvroRecords())
+decoded_pubsub_data| 'PrintData' >> beam.Map(lambda element: logging.log(logging.INFO, "Data === "+element))
+decoded_pubsub_data|"PrintType" >> beam.Map(lambda element: logging.log(logging.INFO, "Type ==="+type(element)))
+#timestamped_data = pubsub_data.valid_recs | "Add Timestamps" >> beam.Map(lambda element: TimestampedValue(element, element['timestamp_field']))
+# str_row = pubsub_data.valid_recs | "DictToStr" >> beam.Map(dict_to_str)
+# op = (str_row | "Write-To-File" >> WriteToText(known_args.gcs_folder_path, file_name_suffix=".csv", header=headers.get("vrepair_ticket_opened_norm_v0")))
+# print_row = (str_row | "Logs" >> beam.Map(lambda r: logging.info(r)))
+# print_invalid = (pubsub_data.invalid_recs | "InvalidLogs" >> beam.Map(lambda r: logging.info(r)))
+# # csv_files = (pubsub_data | "ProcessAvroToCSV" >> beam.Map(process_avro_to_csv))
+# # _ = (csv_files | "WriteCSVToGCS" >> beam.Map(write_csv_to_gcs,known_args.gcs_folder_path))
 
-# Convert to KV pairs for proper windowing
-def create_key_value(element):
-    # Create a key based on relevant fields
-    key = f"{element.get('host')}_{element.get('src')}"
-    return (key, element)
-import argparse
-import json
-import logging
-import time
-from io import BytesIO
-import apache_beam as beam
-from apache_beam import pvalue as pvl
-from apache_beam.transforms.window import FixedWindows
-from apache_beam.io import WriteToText
-from apache_beam.io.gcp.pubsub import ReadFromPubSub
-from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.io.gcp.gcsio import GcsIO
-from apache_beam.transforms.trigger import AfterProcessingTime, AccumulationMode, AfterWatermark
-windowed_data = (pubsub_data.valid_recs
-    | 'CreateKeyValue' >> beam.Map(create_key_value)
-    | 'Add Timestamp' >> beam.ParDo(AddTimestampDoFn())
-    | 'Window' >> beam.WindowInto(
-        FixedWindows(60),
-        trigger=AfterWatermark(
-            early=AfterProcessingTime(10),
-            late=AfterProcessingTime(30)
-        ),
-        allowed_lateness=60,  # Allow 1 minute of late data
-        accumulation_mode=AccumulationMode.DISCARDING
-    )
-    | 'GroupByKey' >> beam.GroupByKey()
-    | 'Flatten' >> beam.FlatMap(lambda x: x[1])  # Flatten grouped values
-)
-
-# Convert to string and write output
-output_data = (windowed_data
-    | 'DictToStr' >> beam.Map(dict_to_str)
-    | 'WriteToFile' >> WriteToText(
-        known_args.gcs_folder_path,
-        file_name_suffix=".csv",
-        header=headers.get("vrepair_ticket_opened_norm_v0"),
-        num_shards=10  # Adjust based on your data volume
-    )
-)
-
-# Error logging
-print_invalid = (pubsub_data.invalid_recs 
-    | 'InvalidLogs' >> beam.Map(lambda r: logging.error(f"Invalid record: {r}")))
-
-p.run().wait_until_finish()
-# # Build the pipeline
-# pubsub_data = (p 
-#     | 'ReadFromPubSub' >> ReadFromPubSub(subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}")
-#     | 'Decode Msg' >> beam.ParDo(DecodeAvroRecords()).with_outputs()
-# )
-
-# str_row = pubsub_data.valid_recs | 'DictToStr' >> beam.Map(dict_to_str)
-
-# from apache_beam.transforms.trigger import AfterProcessingTime, AccumulationMode, AfterWatermark
-
-# # Apply windowing
-# win_str_row = (str_row
-#     | 'Add Timestamp' >> beam.ParDo(AddTimestampDoFn())
-#     | 'Windowing' >> beam.WindowInto(
-#         FixedWindows(60),
-#         trigger=beam.transforms.trigger.AfterWatermark(
-#             early=beam.transforms.trigger.AfterProcessingTime(10),
-#             late=beam.transforms.trigger.AfterProcessingTime(30)
-#         ),
-#         accumulation_mode=AccumulationMode.DISCARDING
-#     )
-# )
-
-# op = (win_str_row 
-#     | 'Write-To-File' >> WriteToText(
-#         known_args.gcs_folder_path,
-#         file_name_suffix=".csv",
-#         header=headers.get("vrepair_ticket_opened_norm_v0")
-#     )
-# )
-
-# print_row = (str_row | 'Logs' >> beam.Map(lambda r: logging.info(r)))
-# print_invalid = (pubsub_data.invalid_recs | 'InvalidLogs' >> beam.Map(lambda r: logging.info(r)))
-
-# # Run the pipeline
-# p.run().wait_until_finish()
-
-# logging.info(f"Created template at {known_args.template_location}.")
+p.run()
+print(f'Created template at {known_args.template_location}.')
 
 
-INFO:apache_beam.typehints.native_type_compatibility:Converting string literal type hint to Any: "PubsubMessage"
-Traceback (most recent call last):
-  File "/home/udayka/model_scores_prospect_hist/vrepair_ticket_opened_norm_v1.py", line 153, in <module>
-    output_data = (windowed_data
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pvalue.py", line 138, in __or__
-    return self.pipeline.apply(ptransform, self)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 681, in apply
-    return self.apply(
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 692, in apply
-    return self.apply(transform, pvalueish)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 754, in apply
-    pvalueish_result = self.runner.apply(transform, pvalueish, self._options)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 191, in apply
-    return self.apply_PTransform(transform, input, options)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 195, in apply_PTransform
-    return transform.expand(input)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/textio.py", line 895, in expand
-    return pcoll | Write(self._sink)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pvalue.py", line 138, in __or__
-    return self.pipeline.apply(ptransform, self)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 754, in apply
-    pvalueish_result = self.runner.apply(transform, pvalueish, self._options)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 191, in apply
-    return self.apply_PTransform(transform, input, options)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 195, in apply_PTransform
-    return transform.expand(input)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/iobase.py", line 1070, in expand
-    return pcoll | WriteImpl(self.sink)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pvalue.py", line 138, in __or__
-    return self.pipeline.apply(ptransform, self)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 754, in apply
-    pvalueish_result = self.runner.apply(transform, pvalueish, self._options)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 191, in apply
-    return self.apply_PTransform(transform, input, options)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 195, in apply_PTransform
-    return transform.expand(input)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/io/iobase.py", line 1140, in expand
-    keyed_pcoll
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pvalue.py", line 138, in __or__
-    return self.pipeline.apply(ptransform, self)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/pipeline.py", line 754, in apply
-    pvalueish_result = self.runner.apply(transform, pvalueish, self._options)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 191, in apply
-    return self.apply_PTransform(transform, input, options)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/runners/runner.py", line 195, in apply_PTransform
-    return transform.expand(input)
-  File "/apps/opt/application/vznet/pyvenv39/lib64/python3.9/site-packages/apache_beam/transforms/core.py", line 3254, in expand
-    raise ValueError(
-ValueError: GroupByKey cannot be applied to an unbounded PCollection with global windowing and a default trigger
-import argparse
-import json
-import logging
-import time
-from io import BytesIO
-import apache_beam as beam
-from apache_beam import pvalue as pvl
-from apache_beam.transforms.window import FixedWindows, TimestampedValue
-from apache_beam.io import WriteToText
-from apache_beam.io.gcp.pubsub import ReadFromPubSub
-from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.io.gcp.gcsio import GcsIO
-from apache_beam.transforms.trigger import AfterProcessingTime, AccumulationMode, AfterWatermark
-from apache_beam.utils.timestamp import Timestamp
-
-# [Previous code remains same until pipeline definition]
-
-class AddTimestampFn(beam.DoFn):
-    def process(self, element):
-        # Use current time instead of element timestamp
-        current_time = time.time()
-        yield TimestampedValue(element, current_time)
-
-pipeline_options = PipelineOptions.from_dictionary(options)
-p = beam.Pipeline(options=pipeline_options)
-
-pubsub_data = (p 
-    | 'ReadFromPubSub' >> ReadFromPubSub(
-        subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}")
-    | 'Decode Msg' >> beam.ParDo(DecodeAvroRecords()).with_outputs()
-)
-
-windowed_data = (pubsub_data.valid_recs
-    | 'AddTimestamp' >> beam.ParDo(AddTimestampFn())
-    | 'Window' >> beam.WindowInto(
-        FixedWindows(60),
-        trigger=AfterWatermark(
-            early=AfterProcessingTime(10),
-            late=AfterProcessingTime(30)
-        ),
-        allowed_lateness=60,
-        accumulation_mode=AccumulationMode.DISCARDING
-    )
-    | 'DictToStr' >> beam.Map(dict_to_str)
-)
-
-output_data = (windowed_data
-    | 'WriteToFile' >> WriteToText(
-        known_args.gcs_folder_path,
-        file_name_suffix=".csv",
-        header=headers.get("vrepair_ticket_opened_norm_v0"),
-        num_shards=10
-    )
-)
-
-print_invalid = (pubsub_data.invalid_recs 
-    | 'InvalidLogs' >> beam.Map(lambda r: logging.error(f"Invalid record: {r}")))
-
-p.run().wait_until_finish()
+TEMP_LOG: reformatted={'timestamp': 1563152004139, 'host': 'TEST-1234-XYZ', 'src': 'vz.pip.eclipse.stat.if_stats.proc.v0', 'ingressTimestamp': 1563153004139, 'origins': ['vmb,kafka,ENMV.PIP.IP'], 'tags': [], 'route': 3, 'fetchTimestamp': 1735993145548, 'rawdata': '{"ont_activation_date": "2022-12-02 05:00:00.000000 UTC", "data_circuit_id": "IbO+zFtdYczFOgBHOkiNNINdZtJpvQClHr6diOckccWWcteRkgJaxL25j3K1OjH9dbrLAUWR2Jd1kDoN44TJug==", "circuit_id": "LGF8pf4gkOZcABnNq9NMxNcE/U2Gc0B3trVK0hEzNp7v5Z7ONCJVcILwpbzVuqyOFxz2XIU/rjOerp6NEmjmnQ==", "video_circuit_id": "LGF8pf4gkOZcABnNq9NMxNcE/U2Gc0B3trVK0hEzNp7v5Z7ONCJVcILwpbzVuqyOFxz2XIU/rjOerp6NEmjmnQ==", "service_type": "BWLHiXyrs2l8/F7ldbmoRsIY7WQhFyX3euXshykBAALkRUlgQLvnnltzAp/ymwFAjc0Auk7LVFC4InQT+g5/1Q==", "address_id": 20808267725.0, "vision_account_id": "ZcXG3TS/LG7ymRvKTaf4C7lUgLMO3MVHIhhQ74DRZ9Y6opYN1hADfRhn4SA+eXs5kbweoYtXXeAVLyo8XD1ioQ==", "vision_customer_id": "0iry578HPx7m50gGovhEuzJ4PyQlDoNd8C+/KmgQuGAoLjtm+W5XITuPgx7f1I9OgZmSvDtv+uMxvd3uJFQvrQ==", "address_type": "SFU", "line_of_business": "Residence"}'}
