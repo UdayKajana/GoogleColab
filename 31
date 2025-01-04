@@ -199,3 +199,64 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+
+
+
+class DecodeAvroRecords(beam.DoFn):
+    # Define the tags as class attributes
+    valid_recs = 'valid_recs'
+    invalid_recs = 'invalid_recs'
+    
+    def process(self, element):
+        def reformat_input_msg_schema(msg):
+            fmt_msg = {
+                'timestamp': msg['timestamp'],
+                'host': msg['host'],
+                'src': msg['src'],
+                'ingressTimestamp': msg['_event_ingress_ts'],
+                'origins': [msg['_event_origin']],
+                'tags': msg['_event_tags'],
+                'route': 3,
+                'fetchTimestamp': int(time.time() * 1000),
+                'rawdata': msg['rawdata']
+            }
+            return fmt_msg
+
+        raw_schema = """{"namespace": "com.vz.vznet",
+                        "type": "record",
+                        "name": "VznetDefault",
+                        "doc": "Default schema for events in transit",
+                        "fields": [
+                            {"name": "timestamp", "type": "long"},
+                            {"name": "host", "type": "string"},
+                            {"name": "src",  "type": "string" },
+                            {"name": "_event_ingress_ts", "type": "long"},
+                            {"name": "_event_origin", "type": "string"},
+                            {"name": "_event_tags", "type": {"type": "array", "items": "string"}},
+                            {"name": "_event_route", "type": "string"},
+                            {"name": "_event_metrics", "type": ["null", "bytes"], "default": null},
+                            {"name": "rawdata", "type": "bytes"}
+                        ]}"""
+        try:
+            schema = avro.schema.Parse(raw_schema)
+            avro_reader = avro_io.DatumReader(schema)
+            avro_message = avro_io.BinaryDecoder(BytesIO(element))
+            message = avro_reader.read(avro_message)
+            
+            if schema.name == 'VznetDefault':
+                message['rawdata'] = message['rawdata'].decode("utf-8")
+                if message['_event_metrics'] is None:
+                    message['_event_metrics'] = message['_event_metrics']
+                else:
+                    message['_event_metrics'] = message['_event_metrics'].decode("utf-8")
+                    
+            reformatted = reformat_input_msg_schema(message)
+            logging.info(f"Successfully decoded message: {reformatted}")
+            yield pvl.TaggedOutput(self.valid_recs, reformatted)
+            
+        except Exception as e:
+            logging.error(f"Error in Decoding::{element}")
+            logging.error(f"Exception details: {e}")
+            yield pvl.TaggedOutput(self.invalid_recs, element)
