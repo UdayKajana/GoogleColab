@@ -13,7 +13,8 @@ import avro.schema
 from apache_beam.io import WriteToText
 from apache_beam.io.gcp.pubsub import ReadFromPubSub
 from apache_beam.options.pipeline_options import PipelineOptions
-
+from apache_beam.transforms.window import FixedWindows
+from apache_beam.transforms.window import TimestampedValue
 # Class to define additional pipeline options
 class TemplateOptions(PipelineOptions):
     @classmethod
@@ -134,29 +135,21 @@ class DecodeAvroRecords(beam.DoFn):
             logging.debug(f"Error in Decoding::{element}")
             logging.debug(e)
             yield pvl.TaggedOutput("invalid_recs", element)
-    # End of class DecodeAvroRecords
-
-# Function to create a time bucket for each message based on its timestamp
 def create_time_bucket(timestamp):
-    return (timestamp // 60000)  # Convert milliseconds to minutes
-    # End of function create_time_bucket
-
-# Function to write batched data to CSV
+    return (timestamp // 60000)
 def write_batched_data_to_csv(batch):
     if not batch:
+        logging.log(logging.INFO, "1908Not a Batch Data")
         return None
-
-    # Prepare CSV output
     output = StringIO()
-    fieldnames = batch[0].keys()  # Use the keys of the first item as headers
+    fieldnames = batch[0].keys()
     writer = csv.DictWriter(output, fieldnames=fieldnames)
-    
     writer.writeheader()
+    logging.log(logging.INFO, "1908len()"+len(batch))
     for data in batch:
         writer.writerow(data)
     
-    return output.getvalue()  # Return CSV string of the batch
-    # End of function write_batched_data_to_csv
+    return output.getvalue()
 
 # Pipeline options
 options = {
@@ -174,7 +167,14 @@ options = {
 
 pipeline_options = PipelineOptions.from_dictionary(options)
 p = beam.Pipeline(options=pipeline_options)
-
+headers = {
+            'dom_fact_sls_to_prov_walk':"acct_sk,mon,cust_sk,svc_party_sk,acct_estbd_dt,acct_term_dt",
+            'dom_cdi_keys_xref':"acct_sk,mon,cust_sk,svc_party_sk,acct_estbd_dt,acct_term_dt",
+            'model_scores_prospect_hist':"addr_id,state_cd,model_id,model_version,round_cycle,model_score,model_decile,model_centile,model_segment,model_subsegment,scoring_driver_1,scoring_driver_2,scoring_driver_3,create_date",
+            'wln_model_scores': "acct_sk,acct_type_cd,create_date,epsilon_cust_id,insert_ts,model_centile,model_decile,model_id,model_score,model_subsegment,model_version,round_cycle,scoring_driver_1,scoring_driver_2,scoring_driver_3",
+            'dim_inventory_customer_profiles_norm_v0':"ont_activation_date,data_circuit_id,circuit_id,video_circuit_id,service_type,address_id,vision_account_id,vision_customer_id,address_type,line_of_business",
+            'vrepair_ticket_opened_norm_v0': "telephone_number,trouble_report_num,address_id,chronic_flag,chronic_total,line_id_trimmed,port_associated_service,date_opened,data_circuit_id,video_circuit_id"
+        }
 # Pipeline definition
 pubsub_data = (
     p | f'ReadFromPubsub {known_args.input_sub}' >> ReadFromPubSub(subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}")
@@ -182,23 +182,11 @@ pubsub_data = (
 )
 
 str_row = pubsub_data.valid_recs | "DictToStr" >> beam.Map(lambda r: {'timestamp': r['timestamp'], 'data': r})
-
-# Group by 1 minute intervals based on timestamp
-grouped_data = (str_row 
-                | "CalculateTimeBucket" >> beam.Map(lambda record: (create_time_bucket(record['timestamp']), record))
-                | "GroupByTimeBucket" >> beam.GroupByKey()
+timestamped_data = str_row | "AddTimestamps" >> beam.Map(lambda x: TimestampedValue(x, x['timestamp'] / 1000))
+windowed_data = timestamped_data | "Windowing" >> beam.WindowInto(FixedWindows(60))
+windowed_data|"Print" >> beam.Map(lambda element: logging.log(logging.INFO, str(element)))
+csv_files = (windowed_data | "WriteCSVToGCS" >> beam.Map(lambda csv_data: write_csv_to_gcs(csv_data, known_args.gcs_folder_path))
 )
-
-# Write grouped data to CSV
-csv_files = (grouped_data 
-             | "WriteToCSV" >> beam.Map(lambda bucket: (bucket[0], write_batched_data_to_csv(bucket[1])))  # bucket[0] is the key (time bucket)
-             | "FilterNone" >> beam.Filter(lambda x: x is not None)
-             | "WriteCSVToGCS" >> beam.Map(lambda csv_data: write_csv_to_gcs(csv_data, known_args.gcs_folder_path))  # Adjust path if needed
-)
-
-print_row = (str_row | "Logs" >> beam.Map(lambda r: logging.info(r)))
-print_invalid = (pubsub_data.invalid_recs | "InvalidLogs" >> beam.Map(lambda r: logging.info(r)))
-
+# grouped_data | 'WriteToGCS' >> beam.io.WriteToText(f'{known_args.gcs_folder_path}/output', header= headers.get('vrepair_ticket_opened_norm_v0'),file_name_suffix='.csv')
 p.run()
 print(f'Created template at {known_args.template_location}.')
-
