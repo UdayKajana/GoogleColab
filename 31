@@ -1,192 +1,84 @@
-import argparse
-import json
-import logging
-import time
-from io import BytesIO, StringIO
-import csv
-import uuid
 import apache_beam as beam
-import apache_beam.pvalue as pvl
-import avro
-import avro.io as avro_io
-import avro.schema
-from apache_beam.io import WriteToText
-from apache_beam.io.gcp.pubsub import ReadFromPubSub
 from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.transforms.window import FixedWindows
-from apache_beam.transforms.window import TimestampedValue
-# Class to define additional pipeline options
-class TemplateOptions(PipelineOptions):
-    @classmethod
-    def _add_argparse_args(cls, parser):
-        parser.add_value_provider_argument('--params', type=str)
+from apache_beam.io.gcp.spanner import SpannerIO
+from google.cloud import spanner
+import logging
 
-# Argument parser for command-line arguments
-parser = argparse.ArgumentParser()
-parser.add_argument('--project', dest='project', required=True, help='GCP Project ID')
-parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
-parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
-parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
-parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
-parser.add_argument('--template_location', dest='template_location', required=True, help='GCS bucket path to save template')
-parser.add_argument('--input_sub', dest='input_sub', required=True, help='Input Subscription')
-parser.add_argument('--sdk_container_image', dest='sdk_container_image', default='us-east4-docker.pkg.dev/vz-it-np-gudv-dev-vzntdo-0/vznet/beamredis:1.0.0', required=False, help='sdk_container_image location')
-parser.add_argument('--gcs_folder_path', dest='gcs_folder_path', required=True, help='GCS folder path to write CSV files')
-
-# Parse arguments
-known_args, beam_args = parser.parse_known_args()
-
-# Function to process Avro data to CSV format
-def process_avro_to_csv(message_data):
-    logging.log(logging.INFO, str(message_data))
-    
-    try:
-        # Read Avro data
-        bytes_reader = BytesIO(message_data)
-        avro_reader = fastavro.reader(bytes_reader)
-
-        # Extract records
-        records = [record for record in avro_reader]
-        if not records:
-            logging.warning("No records found in the Avro message.")
-            return None
-        
-        # Convert records to CSV format
-        fieldnames = list(records[0].keys())
-        csv_buffer = StringIO()
-        writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(records)
-        
-        # Generate a unique filename
-        unique_id = uuid.uuid4()
-        filename = f"message_{unique_id}.csv"
-        logging.info(f"Processed message into file: {filename}")
-        
-        return filename, csv_buffer.getvalue()
-    
-    except Exception as e:
-        logging.error(f"Error processing Avro message: {e}")
-        return None
-    # End of function process_avro_to_csv
-
-# Function to write CSV data to GCS
-def write_csv_to_gcs(element, gcs_location):
-    from apache_beam.io.gcp.gcsio import GcsIO
-    try:
-        filename, csv_data = element
-        if not csv_data:
-            logging.warning(f"No CSV data to write for {filename}. Skipping.")
-            return
-
-        # Define GCS file path
-        gcs_path = f"{gcs_location}/{filename}"
-        logging.info(gcs_path)
-
-        # Write CSV data to GCS
-        gcs_io = GcsIO()
-        with gcs_io.open(gcs_path, 'w') as gcs_file:
-            gcs_file.write(csv_data.encode("utf-8"))
-        logging.info(f"Successfully wrote {filename} to GCS: {gcs_path}")
-    
-    except Exception as e:
-        logging.error(f"Error writing CSV to GCS: {e}")
-    # End of function write_csv_to_gcs
-
-# Custom DoFn class to decode Avro records
-class DecodeAvroRecords(beam.DoFn):
+class ConvertToSpannerMutation(beam.DoFn):
     def process(self, element):
-        def reformat_input_msg_schema(msg):
-            fmt_msg = {}
-            fmt_msg['timestamp'] = msg['timestamp']
-            fmt_msg['host'] = msg['host']
-            fmt_msg['src'] = msg['src']
-            fmt_msg['ingressTimestamp'] = msg['_event_ingress_ts']
-            fmt_msg['origins'] = [msg['_event_origin']]
-            fmt_msg['tags'] = msg['_event_tags']
-            fmt_msg['route'] = 3
-            fmt_msg['fetchTimestamp'] = int(time.time() * 1000)
-            fmt_msg['rawdata'] = msg['rawdata']
-            return fmt_msg
+        # Convert BigQuery row to Spanner mutation
+        # Modify the column names and types according to your schema
+        mutation = spanner.Mutation(
+            insert='your_spanner_table',
+            columns=('column1', 'column2', 'column3'),
+            values=[(
+                element['bq_column1'],
+                element['bq_column2'],
+                element['bq_column3']
+            )]
+        )
+        yield mutation
 
-        raw_schema = """{"namespace": "com.vz.vznet", "type": "record", "name": "VznetDefault", "fields": [
-            {"name": "timestamp", "type": "long"},
-            {"name": "host", "type": "string"},
-            {"name": "src", "type": "string"},
-            {"name": "_event_ingress_ts", "type": "long"},
-            {"name": "_event_origin", "type": "string"},
-            {"name": "_event_tags", "type": {"type": "array", "items": "string"}},
-            {"name": "rawdata", "type": "bytes"}
-            ]}"""
-        
-        try:
-            schema = avro.schema.parse(raw_schema)
-            avro_reader = avro_io.DatumReader(schema)
-            avro_message = avro_io.BinaryDecoder(BytesIO(element))
-            message = avro_reader.read(avro_message)
-
-            message['rawdata'] = message['rawdata'].decode("utf-8")
-            reformatted = reformat_input_msg_schema(message)
-
-            logging.info(f"TEMP_LOG: reformatted={reformatted}")
-            yield pvl.TaggedOutput("valid_recs", reformatted)
-
-        except Exception as e:
-            logging.debug(f"Error in Decoding::{element}")
-            logging.debug(e)
-            yield pvl.TaggedOutput("invalid_recs", element)
-def create_time_bucket(timestamp):
-    return (timestamp // 60000)
-def write_batched_data_to_csv(batch):
-    if not batch:
-        logging.log(logging.INFO, "1908Not a Batch Data")
-        return None
-    output = StringIO()
-    fieldnames = batch[0].keys()
-    writer = csv.DictWriter(output, fieldnames=fieldnames)
-    writer.writeheader()
-    logging.log(logging.INFO, "1908len()"+len(batch))
-    for data in batch:
-        writer.writerow(data)
+def run_pipeline(project_id, instance_id, database_id, query):
+    """
+    Runs the Dataflow pipeline to transfer data from BigQuery to Cloud Spanner.
     
-    return output.getvalue()
+    Args:
+        project_id (str): GCP project ID
+        instance_id (str): Spanner instance ID
+        database_id (str): Spanner database ID
+        query (str): BigQuery query to extract data
+    """
+    
+    # Pipeline options
+    options = PipelineOptions([
+        '--project', project_id,
+        '--runner', 'DataflowRunner',
+        '--region', 'us-central1',  # modify as needed
+        '--temp_location', 'gs://your-bucket/temp',  # modify with your bucket
+        '--setup_file', './setup.py'  # if you have dependencies
+    ])
 
-# Pipeline options
-options = {
-    'project': known_args.project,
-    'runner': known_args.runner,
-    'region': known_args.region,
-    'staging_location': known_args.staging_location,
-    'temp_location': known_args.temp_location,
-    'template_location': known_args.template_location,
-    'save_main_session': True,
-    'streaming': True,
-    'sdk_container_image': known_args.sdk_container_image,
-    'sdk_location': 'container'
-}
+    # Define the pipeline
+    with beam.Pipeline(options=options) as pipeline:
+        # Read from BigQuery
+        bq_data = (pipeline 
+            | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
+                query=query,
+                use_standard_sql=True,
+                project=project_id)
+        )
 
-pipeline_options = PipelineOptions.from_dictionary(options)
-p = beam.Pipeline(options=pipeline_options)
-headers = {
-            'dom_fact_sls_to_prov_walk':"acct_sk,mon,cust_sk,svc_party_sk,acct_estbd_dt,acct_term_dt",
-            'dom_cdi_keys_xref':"acct_sk,mon,cust_sk,svc_party_sk,acct_estbd_dt,acct_term_dt",
-            'model_scores_prospect_hist':"addr_id,state_cd,model_id,model_version,round_cycle,model_score,model_decile,model_centile,model_segment,model_subsegment,scoring_driver_1,scoring_driver_2,scoring_driver_3,create_date",
-            'wln_model_scores': "acct_sk,acct_type_cd,create_date,epsilon_cust_id,insert_ts,model_centile,model_decile,model_id,model_score,model_subsegment,model_version,round_cycle,scoring_driver_1,scoring_driver_2,scoring_driver_3",
-            'dim_inventory_customer_profiles_norm_v0':"ont_activation_date,data_circuit_id,circuit_id,video_circuit_id,service_type,address_id,vision_account_id,vision_customer_id,address_type,line_of_business",
-            'vrepair_ticket_opened_norm_v0': "telephone_number,trouble_report_num,address_id,chronic_flag,chronic_total,line_id_trimmed,port_associated_service,date_opened,data_circuit_id,video_circuit_id"
-        }
-# Pipeline definition
-pubsub_data = (
-    p | f'ReadFromPubsub {known_args.input_sub}' >> ReadFromPubSub(subscription=f"projects/{known_args.project}/subscriptions/{known_args.input_sub}")
-    | 'Decode Msg' >> beam.ParDo(DecodeAvroRecords()).with_outputs()
-)
+        # Convert to Spanner mutations
+        spanner_mutations = (bq_data 
+            | 'ConvertToMutations' >> beam.ParDo(ConvertToSpannerMutation())
+        )
 
-str_row = pubsub_data.valid_recs | "DictToStr" >> beam.Map(lambda r: {'timestamp': r['timestamp'], 'data': r})
-timestamped_data = str_row | "AddTimestamps" >> beam.Map(lambda x: TimestampedValue(x, x['timestamp'] / 1000))
-windowed_data = timestamped_data | "Windowing" >> beam.WindowInto(FixedWindows(60))
-windowed_data|"Print" >> beam.Map(lambda element: logging.log(logging.INFO, str(element)))
-csv_files = (windowed_data | "WriteCSVToGCS" >> beam.Map(lambda csv_data: write_csv_to_gcs(csv_data, known_args.gcs_folder_path))
-)
-# grouped_data | 'WriteToGCS' >> beam.io.WriteToText(f'{known_args.gcs_folder_path}/output', header= headers.get('vrepair_ticket_opened_norm_v0'),file_name_suffix='.csv')
-p.run()
-print(f'Created template at {known_args.template_location}.')
+        # Write to Cloud Spanner
+        _ = (spanner_mutations 
+            | 'WriteToSpanner' >> SpannerIO.write(
+                project_id=project_id,
+                instance_id=instance_id,
+                database_id=database_id,
+                max_batch_size_bytes=1048576  # 1MB batch size
+            )
+        )
+
+if __name__ == '__main__':
+    # Configuration
+    PROJECT_ID = 'your-project-id'
+    INSTANCE_ID = 'your-spanner-instance'
+    DATABASE_ID = 'your-spanner-database'
+    
+    # BigQuery query to extract data
+    QUERY = """
+    SELECT column1, column2, column3
+    FROM `project.dataset.table`
+    WHERE condition = true
+    """
+
+    # Set up logging
+    logging.getLogger().setLevel(logging.INFO)
+    
+    # Run the pipeline
+    run_pipeline(PROJECT_ID, INSTANCE_ID, DATABASE_ID, QUERY)
