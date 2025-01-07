@@ -1,84 +1,165 @@
+# Use Apache Beam Python SDK as base image
+FROM apache/beam_python3.9_sdk:2.50.0
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y \
+    openjdk-11-jdk \
+    python3-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ENV PATH=$PATH:$JAVA_HOME/bin
+ENV PYTHONUNBUFFERED=1
+
+# Create directories for your application
+WORKDIR /dataflow
+RUN mkdir -p /dataflow/lib
+RUN mkdir -p /dataflow/config
+
+# Copy JAR files and dependencies
+COPY lib/*.jar /dataflow/lib/
+ENV CLASSPATH=/dataflow/lib/*:$CLASSPATH
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy configuration files
+COPY config/* /dataflow/config/
+
+# Verify environment script
+COPY verify_env.sh /dataflow/
+RUN chmod +x /dataflow/verify_env.sh
+
+# Copy your pipeline code
+COPY pipeline.py /dataflow/
+COPY setup.py /dataflow/
+
+# Entry point script
+COPY entrypoint.sh /dataflow/
+RUN chmod +x /dataflow/entrypoint.sh
+
+ENTRYPOINT ["/dataflow/entrypoint.sh"]
+
+
+
+# verify_env.sh
+#!/bin/bash
+set -e
+
+echo "Verifying environment setup..."
+
+# Check Java installation
+if ! command -v java &> /dev/null; then
+    echo "Java not found"
+    exit 1
+fi
+
+# Check Python installation
+if ! command -v python3 &> /dev/null; then
+    echo "Python3 not found"
+    exit 1
+fi
+
+# Check if required JARs exist
+if [ ! -d "/dataflow/lib" ] || [ -z "$(ls -A /dataflow/lib)" ]; then
+    echo "Required JARs not found in /dataflow/lib"
+    exit 1
+fi
+
+# Check Python dependencies
+if ! pip freeze | grep -q "apache-beam"; then
+    echo "Required Python dependencies not installed"
+    exit 1
+fi
+
+echo "Environment verification completed successfully"
+exit 0
+
+# entrypoint.sh
+#!/bin/bash
+set -e
+
+# Verify environment first
+/dataflow/verify_env.sh
+
+# Start any required services
+# For example, if you need to start a JAR service:
+if [ -f "/dataflow/lib/service.jar" ]; then
+    nohup java -jar /dataflow/lib/service.jar &
+    sleep 5  # Wait for service to start
+fi
+
+# Execute the pipeline with passed arguments
+exec python /dataflow/pipeline.py "$@"
+
+
+
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-from apache_beam.io.gcp.spanner import SpannerIO
-from google.cloud import spanner
+from apache_beam.options.pipeline_options import SetupOptions
 import logging
+import os
 
-class ConvertToSpannerMutation(beam.DoFn):
-    def process(self, element):
-        # Convert BigQuery row to Spanner mutation
-        # Modify the column names and types according to your schema
-        mutation = spanner.Mutation(
-            insert='your_spanner_table',
-            columns=('column1', 'column2', 'column3'),
-            values=[(
-                element['bq_column1'],
-                element['bq_column2'],
-                element['bq_column3']
-            )]
+class CustomPipelineOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        # Add your custom pipeline arguments here
+        parser.add_value_provider_argument(
+            '--input_subscription',
+            help='Input Pub/Sub subscription'
         )
-        yield mutation
 
-def run_pipeline(project_id, instance_id, database_id, query):
-    """
-    Runs the Dataflow pipeline to transfer data from BigQuery to Cloud Spanner.
-    
-    Args:
-        project_id (str): GCP project ID
-        instance_id (str): Spanner instance ID
-        database_id (str): Spanner database ID
-        query (str): BigQuery query to extract data
-    """
-    
-    # Pipeline options
-    options = PipelineOptions([
-        '--project', project_id,
+def run_pipeline():
+    # Define pipeline options
+    pipeline_options = PipelineOptions([
+        '--project', 'your-project-id',
         '--runner', 'DataflowRunner',
-        '--region', 'us-central1',  # modify as needed
-        '--temp_location', 'gs://your-bucket/temp',  # modify with your bucket
-        '--setup_file', './setup.py'  # if you have dependencies
+        '--region', 'us-central1',
+        '--temp_location', 'gs://your-bucket/temp',
+        '--staging_location', 'gs://your-bucket/staging',
+        
+        # Specify the custom container image for workers
+        '--sdk_container_image', 'gcr.io/your-project/your-dataflow-image:latest',
+        
+        # Use SDK harness container image for Java 11
+        '--worker_harness_container_image', 'apache/beam_java11_sdk:latest',
+        
+        # Machine type for workers
+        '--machine_type', 'n1-standard-4',
+        
+        # Number of workers
+        '--max_num_workers', '10',
+        '--min_num_workers', '1',
+        
+        # Autoscaling algorithm
+        '--autoscaling_algorithm', 'THROUGHPUT_BASED',
+        
+        # Network configuration (if needed)
+        '--network', 'your-network',
+        '--subnetwork', 'regions/us-central1/subnetworks/your-subnet',
+        
+        # Service account for workers
+        '--service_account_email', 'your-service-account@your-project.iam.gserviceaccount.com',
+        
+        # Enable streaming engine for better performance
+        '--enable_streaming_engine',
+        
+        # Worker disk size
+        '--disk_size_gb', '50'
     ])
 
-    # Define the pipeline
-    with beam.Pipeline(options=options) as pipeline:
-        # Read from BigQuery
-        bq_data = (pipeline 
-            | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
-                query=query,
-                use_standard_sql=True,
-                project=project_id)
-        )
+    # Enable custom container and dependencies
+    pipeline_options.view_as(SetupOptions).save_main_session = True
 
-        # Convert to Spanner mutations
-        spanner_mutations = (bq_data 
-            | 'ConvertToMutations' >> beam.ParDo(ConvertToSpannerMutation())
-        )
-
-        # Write to Cloud Spanner
-        _ = (spanner_mutations 
-            | 'WriteToSpanner' >> SpannerIO.write(
-                project_id=project_id,
-                instance_id=instance_id,
-                database_id=database_id,
-                max_batch_size_bytes=1048576  # 1MB batch size
-            )
-        )
+    # Create and run pipeline
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        # Your pipeline logic here
+        pass
 
 if __name__ == '__main__':
-    # Configuration
-    PROJECT_ID = 'your-project-id'
-    INSTANCE_ID = 'your-spanner-instance'
-    DATABASE_ID = 'your-spanner-database'
-    
-    # BigQuery query to extract data
-    QUERY = """
-    SELECT column1, column2, column3
-    FROM `project.dataset.table`
-    WHERE condition = true
-    """
-
-    # Set up logging
     logging.getLogger().setLevel(logging.INFO)
-    
-    # Run the pipeline
-    run_pipeline(PROJECT_ID, INSTANCE_ID, DATABASE_ID, QUERY)
+    run_pipeline()
