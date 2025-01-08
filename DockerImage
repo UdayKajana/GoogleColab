@@ -1,4 +1,4 @@
-# Use official Java image as base
+by# Use official Java image as base
 FROM openjdk:11-slim
 
 # Install Python and required tools
@@ -48,3 +48,25 @@ ENV PYTHON_SCRIPT_GCS_PATH="gs://your-bucket/your-script.py"
 
 # Set startup script as entrypoint
 ENTRYPOINT ["/app/startup.sh"]
+
+
+
+
+
+# Use an official Java 11 base image
+FROM openjdk:11-jdk-slim
+
+# Install Python 3.8 and pip
+RUN apt-get update && \
+    apt-get install -y python3.8 python3-pip && \
+    ln -s /usr/bin/python3.8 /usr/bin/python && \
+    python --version && pip --version
+
+# Set the working directory
+WORKDIR /app
+
+# Copy local files to the container (if needed for a project)
+COPY . /app
+
+# Define the entrypoint (optional, for running Python or Java scripts by default)
+CMD ["bash"]
