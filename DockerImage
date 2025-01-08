@@ -1,4 +1,4 @@
-by# Use official Java image as base
+eeby# Use official Java image as base
 FROM openjdk:11-slim
 
 # Install Python and required tools
@@ -69,4 +69,39 @@ WORKDIR /app
 COPY . /app
 
 # Define the entrypoint (optional, for running Python or Java scripts by default)
+CMD ["bash"]
+
+
+
+
+
+
+
+# Stage 1: Build Stage (if needed for compilation, etc.)
+FROM openjdk:11-jdk-slim AS build-stage
+
+# Add build dependencies (if needed)
+
+# Stage 2: Runtime Stage
+FROM openjdk:11-jdk-slim
+
+# Install Python 3.8
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y python3.8 python3-pip && \
+    ln -s /usr/bin/python3.8 /usr/bin/python && \
+    python --version && pip --version
+
+# Copy artifacts from build stage (if needed)
+# COPY --from=build-stage /path/to/artifacts /path/in/runtime
+
+# Set working directory
+WORKDIR /app
+
+# Copy application files to the runtime container
+COPY . /app
+
+# Default command (optional)
 CMD ["bash"]
