@@ -1,107 +1,37 @@
-eeby# Use official Java image as base
-FROM openjdk:11-slim
-
-# Install Python and required tools
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    wget \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Google Cloud SDK for GCS access
-RUN wget -q https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-latest-linux-x86_64.tar.gz \
-    && tar xf google-cloud-sdk-latest-linux-x86_64.tar.gz \
-    && ./google-cloud-sdk/install.sh --quiet \
-    && rm google-cloud-sdk-latest-linux-x86_64.tar.gz
-
-# Add Google Cloud SDK to PATH
-ENV PATH $PATH:/google-cloud-sdk/bin
-
-# Create working directory
-WORKDIR /app
-
-# Create startup script
-RUN echo '#!/bin/bash\n\
-\n\
-# Download JAR from GCS\n\
-gsutil cp $JAR_GCS_PATH /app/service.jar\n\
-\n\
-# Download Python script from GCS\n\
-gsutil cp $PYTHON_SCRIPT_GCS_PATH /app/script.py\n\
-\n\
-# Start Java service\n\
-java -jar /app/service.jar &\n\
-\n\
-# Wait for service to be ready (adjust sleep time based on your service startup time)\n\
-sleep 10\n\
-\n\
-# Run Python script\n\
-python3 /app/script.py\n\
-' > /app/startup.sh
-
-# Make startup script executable
-RUN chmod +x /app/startup.sh
-
-# Set environment variables (these will be overridden at runtime)
-ENV JAR_GCS_PATH="gs://your-bucket/your-service.jar"
-ENV PYTHON_SCRIPT_GCS_PATH="gs://your-bucket/your-script.py"
-
-# Set startup script as entrypoint
-ENTRYPOINT ["/app/startup.sh"]
+FROM ubuntu:20.04
+RUN apt-get update && apt-get install -y openjdk-11-jdk python3.8 python3-pip
 
 
+# Use a lightweight base image
+FROM debian:bullseye-slim
 
+# Install basic dependencies
+RUN apt-get update && apt-get install -y wget tar curl unzip gnupg && \
+    rm -rf /var/lib/apt/lists/*
 
+# Install Java 11 manually
+RUN wget https://download.oracle.com/java/17/latest/jdk-17_linux-x64_bin.tar.gz -O /tmp/jdk.tar.gz && \
+    mkdir /opt/java && \
+    tar -xzf /tmp/jdk.tar.gz -C /opt/java --strip-components=1 && \
+    rm /tmp/jdk.tar.gz && \
+    ln -s /opt/java/bin/java /usr/bin/java && \
+    java -version
 
-# Use an official Java 11 base image
-FROM openjdk:11-jdk-slim
-
-# Install Python 3.8 and pip
-RUN apt-get update && \
-    apt-get install -y python3.8 python3-pip && \
-    ln -s /usr/bin/python3.8 /usr/bin/python && \
-    python --version && pip --version
+# Install Python 3.8 manually
+RUN wget https://www.python.org/ftp/python/3.8.17/Python-3.8.17.tgz -O /tmp/python.tgz && \
+    tar -xzf /tmp/python.tgz -C /tmp && \
+    cd /tmp/Python-3.8.17 && \
+    ./configure --enable-optimizations && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/Python-3.8.17 /tmp/python.tgz && \
+    python3.8 --version
 
 # Set the working directory
 WORKDIR /app
 
-# Copy local files to the container (if needed for a project)
+# Copy application files
 COPY . /app
 
-# Define the entrypoint (optional, for running Python or Java scripts by default)
-CMD ["bash"]
-
-
-
-
-
-
-
-# Stage 1: Build Stage (if needed for compilation, etc.)
-FROM openjdk:11-jdk-slim AS build-stage
-
-# Add build dependencies (if needed)
-
-# Stage 2: Runtime Stage
-FROM openjdk:11-jdk-slim
-
-# Install Python 3.8
-RUN apt-get update && \
-    apt-get install -y software-properties-common && \
-    add-apt-repository ppa:deadsnakes/ppa && \
-    apt-get update && \
-    apt-get install -y python3.8 python3-pip && \
-    ln -s /usr/bin/python3.8 /usr/bin/python && \
-    python --version && pip --version
-
-# Copy artifacts from build stage (if needed)
-# COPY --from=build-stage /path/to/artifacts /path/in/runtime
-
-# Set working directory
-WORKDIR /app
-
-# Copy application files to the runtime container
-COPY . /app
-
-# Default command (optional)
+# Default command
 CMD ["bash"]
