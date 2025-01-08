@@ -1,37 +1,60 @@
-FROM ubuntu:20.04
-RUN apt-get update && apt-get install -y openjdk-11-jdk python3.8 python3-pip
+# Use an official Python base image
+FROM python:3.9-slim
 
-
-# Use a lightweight base image
-FROM debian:bullseye-slim
-
-# Install basic dependencies
-RUN apt-get update && apt-get install -y wget tar curl unzip gnupg && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install Java 11 manually
-RUN wget https://download.oracle.com/java/17/latest/jdk-17_linux-x64_bin.tar.gz -O /tmp/jdk.tar.gz && \
-    mkdir /opt/java && \
-    tar -xzf /tmp/jdk.tar.gz -C /opt/java --strip-components=1 && \
-    rm /tmp/jdk.tar.gz && \
-    ln -s /opt/java/bin/java /usr/bin/java && \
-    java -version
-
-# Install Python 3.8 manually
-RUN wget https://www.python.org/ftp/python/3.8.17/Python-3.8.17.tgz -O /tmp/python.tgz && \
-    tar -xzf /tmp/python.tgz -C /tmp && \
-    cd /tmp/Python-3.8.17 && \
-    ./configure --enable-optimizations && \
-    make -j$(nproc) && \
-    make install && \
-    rm -rf /tmp/Python-3.8.17 /tmp/python.tgz && \
-    python3.8 --version
+# Install required tools
+RUN apt-get update && apt-get install -y \
+    openjdk-11-jre-headless \
+    curl && \
+    apt-get clean
 
 # Set the working directory
 WORKDIR /app
 
-# Copy application files
-COPY . /app
+# Copy the entrypoint script
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-# Default command
-CMD ["bash"]
+# Set the entrypoint script as the default command
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+#!/bin/bash
+set -e
+
+# Variables for GCS file paths
+JAR_GCS_PATH="gs://your-bucket/path-to-your-jar-file.jar"
+PYTHON_GCS_PATH="gs://your-bucket/path-to-your-python-file.py"
+JAR_LOCAL_PATH="/app/application.jar"
+PYTHON_LOCAL_PATH="/app/script.py"
+
+# Install Google Cloud SDK (if not already installed)
+if ! command -v gsutil &> /dev/null; then
+  echo "Installing Google Cloud SDK..."
+  curl https://sdk.cloud.google.com | bash > /dev/null
+  export PATH=$PATH:/root/google-cloud-sdk/bin
+fi
+
+# Fetch the JAR file from GCS
+echo "Downloading JAR file from GCS..."
+gsutil cp "$JAR_GCS_PATH" "$JAR_LOCAL_PATH"
+
+# Fetch the Python file from GCS
+echo "Downloading Python file from GCS..."
+gsutil cp "$PYTHON_GCS_PATH" "$PYTHON_LOCAL_PATH"
+
+# Ensure files are executable
+chmod +x "$JAR_LOCAL_PATH" "$PYTHON_LOCAL_PATH"
+
+# Start the JAR application
+echo "Starting the JAR application..."
+java -jar "$JAR_LOCAL_PATH" &
+
+# Wait for the JAR application to initialize (optional)
+sleep 5
+
+# Run the Python script
+echo "Running the Python script..."
+python3 "$PYTHON_LOCAL_PATH"
+
+# Wait for all background processes to finish
+wait
+
