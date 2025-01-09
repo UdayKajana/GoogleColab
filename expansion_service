@@ -1,0 +1,307 @@
+# Use the official Dataflow base image
+FROM gcr.io/dataflow-templates-base/python3-template-launcher-base
+
+# Set working directory
+WORKDIR /opt/beam
+
+# Create directories for local dependencies
+RUN mkdir -p /opt/beam/local-deps/java
+RUN mkdir -p /opt/beam/local-deps/python
+
+# Copy local dependency files
+# Java dependencies
+COPY ./local-deps/java/openjdk-11-jre.tar.gz /opt/beam/local-deps/java/
+COPY ./local-deps/java/beam-sdks-java-extensions-sql-expansion-service-2.61.0.jar /opt/beam/lib/
+
+# Python dependencies (wheels and source files)
+COPY ./local-deps/python/wheels/* /opt/beam/local-deps/python/
+
+# Copy application files
+COPY ./src/pipeline.py /opt/beam/
+COPY ./src/requirements.txt /opt/beam/
+COPY ./src/startup.sh /opt/beam/
+
+# Install Java from local package
+RUN cd /opt/beam/local-deps/java && \
+    tar xzf openjdk-11-jre.tar.gz && \
+    mv jre-11 /usr/local/java && \
+    ln -s /usr/local/java/bin/java /usr/bin/java
+
+# Install Python dependencies from local wheels
+RUN pip install --no-index --find-links=/opt/beam/local-deps/python -r requirements.txt
+
+# Make startup script executable
+RUN chmod +x /opt/beam/startup.sh
+
+# Set environment variables
+ENV EXPANSION_SERVICE_JAR=/opt/beam/lib/beam-sdks-java-extensions-sql-expansion-service-2.61.0.jar
+ENV PYTHONPATH=/opt/beam
+ENV JAVA_HOME=/usr/local/java
+
+ENTRYPOINT ["/opt/beam/startup.sh"]
+
+
+
+#!/bin/bash
+
+# startup.sh
+echo "Starting Beam SQL expansion service..."
+
+# Start the SQL expansion service
+java -jar ${EXPANSION_SERVICE_JAR} --port=${EXPANSION_SERVICE_PORT:-8097} &
+EXPANSION_SERVICE_PID=$!
+
+# Function to cleanup expansion service on exit
+cleanup() {
+    echo "Cleaning up expansion service..."
+    kill $EXPANSION_SERVICE_PID
+    exit 0
+}
+
+# Register cleanup function
+trap cleanup SIGTERM SIGINT
+
+# Wait for expansion service to start
+sleep 10
+
+# Launch the Dataflow job
+python /opt/beam/pipeline.py \
+    --project=${PROJECT_ID} \
+    --job_name=${JOB_NAME} \
+    --region=${REGION} \
+    --temp_location=${TEMP_LOCATION} \
+    --staging_location=${STAGING_LOCATION} \
+    --expansion_service_port=${EXPANSION_SERVICE_PORT:-8097} \
+    --runner=DataflowRunner \
+    --worker_harness_container_image=${WORKER_HARNESS_CONTAINER_IMAGE} \
+    --experiments=use_runner_v2
+
+# Keep the container running
+wait $EXPANSION_SERVICE_PID
+
+
+
+project/
+├── local-deps/
+│   ├── java/
+│   │   ├── openjdk-11-jre.tar.gz
+│   │   └── beam-sdks-java-extensions-sql-expansion-service-2.61.0.jar
+│   └── python/
+│       └── wheels/
+│           ├── apache_beam-2.50.0-py3-none-any.whl
+│           └── [other required wheels...]
+├── src/
+│   ├── pipeline.py
+│   ├── requirements.txt
+│   └── startup.sh
+└── Dockerfile
+
+
+# Create directory structure
+mkdir -p local-deps/{java,python/wheels} src
+
+# Copy your jar file to local-deps/java/
+cp beam-sdks-java-extensions-sql-expansion-service-2.61.0.jar local-deps/java/
+
+# Download Python wheels on a machine with internet access:
+pip download -r requirements.txt -d local-deps/python/wheels/
+
+# Copy your JRE package to local-deps/java/
+# You'll need to obtain this from your organization's approved sources
+
+
+docker build -t gcr.io/your-project/beam-sql-offline:latest .
+docker push gcr.io/your-project/beam-sql-offline:latest
+
+
+gcloud dataflow flex-template build \
+    gs://your-bucket/templates/beam-sql-offline.json \
+    --image-gcr-path="gcr.io/your-project/beam-sql-offline:latest" \
+    --sdk-language=PYTHON \
+    --metadata-file="metadata.json"
+
+
+gcloud dataflow flex-template run "beam-sql-job-$(date +%Y%m%d-%H%M%S)" \
+    --template-file-gcs-location="gs://your-bucket/templates/beam-sql-offline.json" \
+    --region=your-region \
+    --parameters temp_location="gs://your-bucket/temp" \
+    --parameters expansion_service_port="8097" \
+    --network="your-network" \
+    --subnetwork="regions/your-region/subnetworks/your-subnetwork" \
+    --service-account-email="your-service-account@your-project.iam.gserviceaccount.com" \
+    --worker-machine-type="n1-standard-4" \
+    --max-workers=10
+
+
+
+
+
+
+# pipeline.py
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions, SetupOptions
+from apache_beam.runners.dataflow.dataflow_runner import DataflowRunner
+import apache_beam.transforms.window as window
+import logging
+import subprocess
+import time
+import os
+import json
+from typing import Dict, List, Any
+
+class SQLPipelineOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        # SQL expansion service configuration
+        parser.add_argument(
+            '--expansion_service_port',
+            default='8097',
+            help='Port for the SQL expansion service'
+        )
+        # Add your custom pipeline parameters here
+        parser.add_argument(
+            '--input_table',
+            help='BigQuery input table in format: project:dataset.table'
+        )
+        parser.add_argument(
+            '--output_table',
+            help='BigQuery output table in format: project:dataset.table'
+        )
+
+class ExpansionServiceManager:
+    """Manages the SQL expansion service lifecycle"""
+    
+    def __init__(self, port: str, jar_path: str):
+        self.port = port
+        self.jar_path = jar_path
+        self.process = None
+        
+    def start(self):
+        """Starts the SQL expansion service"""
+        try:
+            logging.info(f"Starting SQL expansion service on port {self.port}")
+            self.process = subprocess.Popen(
+                ['java', '-jar', self.jar_path, f'--port={self.port}'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            time.sleep(10)  # Wait for service to start
+            logging.info("SQL expansion service started successfully")
+        except Exception as e:
+            logging.error(f"Failed to start SQL expansion service: {str(e)}")
+            raise
+            
+    def stop(self):
+        """Stops the SQL expansion service"""
+        if self.process:
+            self.process.terminate()
+            logging.info("SQL expansion service stopped")
+
+class EnsureExpansionService(beam.DoFn):
+    """DoFn to ensure expansion service is running on each worker"""
+    
+    def __init__(self, port: str):
+        self.port = port
+        self.manager = None
+        
+    def setup(self):
+        jar_path = os.path.join(os.getcwd(), 'lib', 
+                               'beam-sdks-java-extensions-sql-expansion-service-2.61.0.jar')
+        self.manager = ExpansionServiceManager(self.port, jar_path)
+        self.manager.start()
+        
+    def process(self, element):
+        yield element
+        
+    def teardown(self):
+        if self.manager:
+            self.manager.stop()
+
+def run_pipeline(argv=None):
+    """Main pipeline execution function"""
+    
+    # Parse pipeline options
+    pipeline_options = SQLPipelineOptions(argv)
+    pipeline_options.view_as(SetupOptions).save_main_session = True
+    pipeline_options.view_as(StandardOptions).streaming = False
+    
+    # Construct the pipeline
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        # Ensure expansion service is running on all workers
+        _ = (pipeline 
+             | 'CreateInitialElement' >> beam.Create([1])
+             | 'EnsureExpansionService' >> beam.ParDo(
+                 EnsureExpansionService(pipeline_options.expansion_service_port)
+             ))
+        
+        # Read data from BigQuery
+        raw_data = (pipeline 
+                   | 'ReadFromBigQuery' >> beam.io.ReadFromBigQuery(
+                       query=f'SELECT * FROM `{pipeline_options.input_table}`',
+                       use_standard_sql=True
+                   ))
+        
+        # Convert to beam.Row format for SQL processing
+        row_data = (raw_data 
+                   | 'ConvertToRow' >> beam.Map(
+                       lambda x: beam.Row(**x)
+                   ).with_output_types(beam.Row))
+        
+        # Register the PCollection as a table for SQL
+        _ = (row_data 
+             | 'RegisterTable' >> beam.transforms.external.JavaExternalTransform(
+                 'beam:transforms:register_input',
+                 {
+                     'table_name': 'input_table'
+                 },
+                 f'localhost:{pipeline_options.expansion_service_port}'
+             ))
+        
+        # Execute SQL transformation using expansion service
+        transformed_data = (pipeline 
+                          | 'ExecuteSQL' >> beam.transforms.external.JavaExternalTransform(
+                              'beam:transforms:sql',
+                              {
+                                  'query': '''
+                                      SELECT 
+                                          field1,
+                                          field2,
+                                          COUNT(*) as count,
+                                          SUM(numeric_field) as total
+                                      FROM input_table
+                                      GROUP BY field1, field2
+                                      HAVING COUNT(*) > 1
+                                  '''
+                              },
+                              f'localhost:{pipeline_options.expansion_service_port}'
+                          ))
+        
+        # Write results to BigQuery
+        schema = {
+            'fields': [
+                {'name': 'field1', 'type': 'STRING'},
+                {'name': 'field2', 'type': 'STRING'},
+                {'name': 'count', 'type': 'INTEGER'},
+                {'name': 'total', 'type': 'FLOAT'}
+            ]
+        }
+        
+        (transformed_data 
+         | 'PrepareBigQueryWrite' >> beam.Map(
+             lambda row: {
+                 'field1': row.field1,
+                 'field2': row.field2,
+                 'count': row.count,
+                 'total': row.total
+             }
+         )
+         | 'WriteToBigQuery' >> beam.io.WriteToBigQuery(
+             pipeline_options.output_table,
+             schema=schema,
+             write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE,
+             create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED
+         ))
+
+if __name__ == '__main__':
+    logging.getLogger().setLevel(logging.INFO)
+    run_pipeline()
