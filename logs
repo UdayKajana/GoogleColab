@@ -1,72 +1,142 @@
-from airflow import DAG
-from airflow.operators.python_operator import PythonOperator
-from datetime import datetime, timedelta
+# pipeline.py
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+import logging
+import json
 
-default_args = {
-    'owner': 'airflow',
-    'depends_on_past': False,
-    'start_date': datetime(2024, 1, 1),
-    'email_on_failure': False,
-    'email_on_retry': False,
-    'retries': 1,
-    'retry_delay': timedelta(minutes=5),
-}
+class SQLPipelineOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_argument(
+            '--expansion_service_port',
+            default='8097',
+            help='Port for the SQL expansion service'
+        )
+        parser.add_argument(
+            '--input_table',
+            help='Input table name'
+        )
 
-def my_python_function():
-    # Your Python code logic here
-    print("Executing local Python code")
-    # Add your data processing logic
-    return "Success"
+def create_sample_data():
+    return [
+        {'id': 1, 'name': 'John', 'age': 30},
+        {'id': 2, 'name': 'Jane', 'age': 25},
+        {'id': 3, 'name': 'Bob', 'age': 35}
+    ]
 
-dag = DAG(
-    'local_python_execution',
-    default_args=default_args,
-    description='DAG to run Python code locally',
-    schedule_interval=timedelta(days=1)
-)
+def run_pipeline(argv=None):
+    pipeline_options = SQLPipelineOptions()
+    
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        # Create sample PCollection
+        sample_data = (pipeline 
+            | 'CreateData' >> beam.Create(create_sample_data())
+            | 'ConvertToRow' >> beam.Map(
+                lambda x: beam.Row(
+                    id=x['id'],
+                    name=x['name'],
+                    age=x['age']
+                )
+            ))
+        
+        # Register the PCollection as a table
+        sample_data | 'RegisterTable' >> beam.transforms.external.JavaExternalTransform(
+            'beam:transforms:register_input',
+            {
+                'table_name': 'sample_table'
+            },
+            f'localhost:{pipeline_options.expansion_service_port}'
+        )
+        
+        # Execute SQL query using external transform
+        sql_results = pipeline | beam.transforms.external.JavaExternalTransform(
+            'beam:transforms:sql',
+            {
+                'query': 'SELECT id, name, age FROM sample_table WHERE age > 25'
+            },
+            f'localhost:{pipeline_options.expansion_service_port}'
+        )
+        
+        # Convert results to string and log
+        sql_results | 'ProcessResults' >> beam.Map(lambda row: logging.info(f'Result: {row}'))
 
-run_python = PythonOperator(
-    task_id='execute_python_code',
-    python_callable=my_python_function,
-    dag=dag
-)
+if __name__ == '__main__':
+    logging.getLogger().setLevel(logging.INFO)
+    run_pipeline()
 
 
 
 
+#!/bin/bash
 
-from airflow import DAG
-from airflow.providers.google.cloud.operators.dataflow import DataflowCreatePythonJobOperator
-from datetime import datetime, timedelta
+# startup.sh
+EXPANSION_JAR="beam-sdks-java-extensions-sql-expansion-service-2.61.0.jar"
 
-default_args = {
-    'owner': 'airflow',
-    'depends_on_past': False,
-    'start_date': datetime(2024, 1, 1),
-    'email_on_failure': False,
-    'email_on_retry': False,
-    'retries': 1,
-    'retry_delay': timedelta(minutes=5),
-}
+# Download jar from GCS if not exists
+if [ ! -f "${EXPANSION_JAR}" ]; then
+    gsutil cp "gs://your-bucket/${EXPANSION_JAR}" .
+fi
 
-dag = DAG(
-    'dataflow_python_job',
-    default_args=default_args,
-    description='DAG to trigger Dataflow Python job',
-    schedule_interval=timedelta(days=1)
-)
+# Start the SQL expansion service
+java -jar ${EXPANSION_JAR} --port=${EXPANSION_SERVICE_PORT:-8097} &
 
-dataflow_task = DataflowCreatePythonJobOperator(
-    task_id='dataflow_python_execution',
-    py_file='gs://your-bucket/path/to/dataflow_script.py',
-    job_name='dataflow-python-job-{{ds_nodash}}',
-    location='us-central1',
-    project_id='your-project-id',
-    gcp_conn_id='google_cloud_default',
-    options={
-        'temp_location': 'gs://your-bucket/temp',
-        'staging_location': 'gs://your-bucket/staging',
-        'region': 'us-central1'
-    },
-    dag=dag
-)
+# Wait for expansion service to start
+sleep 10
+
+# Launch the Dataflow job
+python pipeline.py \
+    --project=${PROJECT_ID} \
+    --job_name=${JOB_NAME} \
+    --region=${REGION} \
+    --temp_location=${TEMP_LOCATION} \
+    --staging_location=${STAGING_LOCATION} \
+    --setup_file=/path/to/setup.py \
+    --expansion_service_port=${EXPANSION_SERVICE_PORT} \
+    --runner=DataflowRunner
+
+
+
+
+FROM gcr.io/dataflow-templates-base/python3-template-launcher-base
+
+# Install Java
+RUN apt-get update && apt-get install -y openjdk-11-jre
+
+# Install gsutil
+RUN apt-get install -y google-cloud-sdk
+
+# Create working directory
+WORKDIR /opt/beam
+
+# Copy your pipeline code and startup script
+COPY pipeline.py ./
+COPY startup.sh ./
+
+# Make startup script executable
+RUN chmod +x startup.sh
+
+ENTRYPOINT ["./startup.sh"]
+
+
+
+docker build -t gcr.io/your-project/beam-sql-pipeline .
+docker push gcr.io/your-project/beam-sql-pipeline
+
+
+
+
+export PROJECT_ID="your-project"
+export JOB_NAME="beam-sql-test-$(date +%Y%m%d-%H%M%S)"
+export REGION="your-region"
+export TEMP_LOCATION="gs://your-bucket/temp"
+export STAGING_LOCATION="gs://your-bucket/staging"
+export EXPANSION_SERVICE_PORT="8097"
+
+docker run \
+  -e PROJECT_ID \
+  -e JOB_NAME \
+  -e REGION \
+  -e TEMP_LOCATION \
+  -e STAGING_LOCATION \
+  -e EXPANSION_SERVICE_PORT \
+  gcr.io/your-project/beam-sql-pipeline
