@@ -1,61 +1,72 @@
-import logging
-import sys
-import argparse
-from apache_beam import Create, Map, Pipeline, Row
-from apache_beam.transforms.sql import SqlTransform
-from apache_beam.transforms.external import JavaJarExpansionService
-from apache_beam.options.pipeline_options import PipelineOptions
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime, timedelta
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--project', dest='project', required=True, help='Project ID')
-parser.add_argument('--runner', dest='runner', required=False, default="DataflowRunner", help='Pipeline runner')
-parser.add_argument('--region', dest='region', required=False, default="us-east4", help='GCP project region')
-parser.add_argument('--staging_location', dest='staging_location', required=True, help='Staging GCS bucket path')
-parser.add_argument('--temp_location', dest='temp_location', required=True, help='Temp GCS bucket path')
-
-known_args, beam_args = parser.parse_known_args()
-
-options = {
-    'project': known_args.project,
-    'runner': known_args.runner,
-    'region': known_args.region,
-    'staging_location': known_args.staging_location,
-    'temp_location': known_args.temp_location,
-    'save_main_session': True,
-    'streaming': False
+default_args = {
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'start_date': datetime(2024, 1, 1),
+    'email_on_failure': False,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
 }
 
-pipeline_options = PipelineOptions.from_dictionary(options)
+def my_python_function():
+    # Your Python code logic here
+    print("Executing local Python code")
+    # Add your data processing logic
+    return "Success"
 
-def create_row(x):
-    return Row(
-        recipe=str(x[0]),
-        fruit=str(x[1]), 
-        quantity=int(x[2]),
-        unit_cost=float(x[3]),
-        is_berry=bool(x[1].endswith('berry'))
-    )
+dag = DAG(
+    'local_python_execution',
+    default_args=default_args,
+    description='DAG to run Python code locally',
+    schedule_interval=timedelta(days=1)
+)
 
-def run_pipeline():
-    with Pipeline(options=pipeline_options) as p:
-        # Move expansion service creation inside the pipeline
-        expansion_service = JavaJarExpansionService("/app/beam-sdks-java-extensions-sql-expansion-service-2.61.0.jar")
-        
-        data = [
-            ["pie", "strawberry", 3, 1.5],
-            ["muffin", "blueberry", 2, 2.0]
-        ]
+run_python = PythonOperator(
+    task_id='execute_python_code',
+    python_callable=my_python_function,
+    dag=dag
+)
 
-        pc = (p 
-              | Create(data)
-              | Map(create_row))
 
-        result = (pc 
-                 | SqlTransform("SELECT * FROM PCOLLECTION WHERE quantity > 1", 
-                              expansion_service=expansion_service)
-                 | "printing" >> Map(print))
 
-if __name__ == '__main__':
-    run_pipeline()
+
+
+from airflow import DAG
+from airflow.providers.google.cloud.operators.dataflow import DataflowCreatePythonJobOperator
+from datetime import datetime, timedelta
+
+default_args = {
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'start_date': datetime(2024, 1, 1),
+    'email_on_failure': False,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
+}
+
+dag = DAG(
+    'dataflow_python_job',
+    default_args=default_args,
+    description='DAG to trigger Dataflow Python job',
+    schedule_interval=timedelta(days=1)
+)
+
+dataflow_task = DataflowCreatePythonJobOperator(
+    task_id='dataflow_python_execution',
+    py_file='gs://your-bucket/path/to/dataflow_script.py',
+    job_name='dataflow-python-job-{{ds_nodash}}',
+    location='us-central1',
+    project_id='your-project-id',
+    gcp_conn_id='google_cloud_default',
+    options={
+        'temp_location': 'gs://your-bucket/temp',
+        'staging_location': 'gs://your-bucket/staging',
+        'region': 'us-central1'
+    },
+    dag=dag
+)
