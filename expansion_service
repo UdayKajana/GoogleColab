@@ -305,3 +305,65 @@ def run_pipeline(argv=None):
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
     run_pipeline()
+
+
+
+
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+import logging
+
+class SQLTestOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_argument(
+            '--expansion_service_port',
+            default='8097',
+            help='Port for SQL expansion service'
+        )
+
+def create_sample_data():
+    """Create some sample records"""
+    return [
+        {'id': 1, 'name': 'Alice', 'score': 95},
+        {'id': 2, 'name': 'Bob', 'score': 85},
+        {'id': 3, 'name': 'Charlie', 'score': 90}
+    ]
+
+def run_pipeline():
+    pipeline_options = SQLTestOptions()
+    
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        # Create sample data and convert to beam.Row
+        initial_data = (pipeline 
+            | 'CreateData' >> beam.Create(create_sample_data())
+            | 'ConvertToRow' >> beam.Map(
+                lambda x: beam.Row(
+                    id=x['id'],
+                    name=x['name'],
+                    score=x['score']
+                )))
+
+        # Register data as a table named 'students'
+        _ = (initial_data 
+            | 'RegisterTable' >> beam.transforms.external.JavaExternalTransform(
+                'beam:transforms:register_input',
+                {'table_name': 'students'},
+                f'localhost:{pipeline_options.expansion_service_port}'
+            ))
+
+        # Query the registered table using SQL
+        results = (pipeline 
+            | 'QueryData' >> beam.transforms.external.JavaExternalTransform(
+                'beam:transforms:sql',
+                {'query': 'SELECT * FROM students WHERE score >= 90'},
+                f'localhost:{pipeline_options.expansion_service_port}'
+            ))
+
+        # Print results
+        results | 'PrintResults' >> beam.Map(lambda x: logging.info(f'Result: {x}'))
+
+if __name__ == '__main__':
+    logging.getLogger().setLevel(logging.INFO)
+    run_pipeline()
+
