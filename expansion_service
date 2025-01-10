@@ -1,214 +1,142 @@
-FROM apache/beam_python3.9_sdk:2.61.0
+# Use official Python image as base
+FROM apache/beam_python3.8_sdk:2.61.0
 
-# Install Java for running the expansion service
-RUN apt-get update && \
-    apt-get install -y openjdk-11-jdk && \
-    apt-get clean
+# Set working directory
+WORKDIR /pipeline
 
-# Download the SQL expansion service JAR
-RUN wget -P /opt/apache/beam/jars https://repo1.maven.org/maven2/org/apache/beam/beam-sdks-java-extensions-sql-expansion-service/2.61.0/beam-sdks-java-extensions-sql-expansion-service-2.61.0.jar
+# Copy the expansion service JAR
+ADD https://repo1.maven.org/maven2/org/apache/beam/beam-sdks-java-extensions-sql-expansion-service/2.61.0/beam-sdks-java-extensions-sql-expansion-service-2.61.0.jar /opt/apache/beam/jars/
 
-# Copy the launcher code
-COPY pipeline_launcher.py /template/pipeline_launcher.py
+# Copy pipeline code and requirements
+COPY pipeline/ ./
 
-# Set the required metadata labels
-LABEL "template.name"="beam-sql-flex-template"
-LABEL "template.version"="1.0.0"
-LABEL "template.description"="Apache Beam SQL Flex Template with expansion service"
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Set environment variables
+ENV EXPANSION_SERVICE_PORT=8097
+ENV BEAM_SQL_EXPANSION_JAR=/opt/apache/beam/jars/beam-sdks-java-extensions-sql-expansion-service-2.61.0.jar
+
+# Start the expansion service
+RUN nohup java -jar $BEAM_SQL_EXPANSION_JAR --expansion-service-port=$EXPANSION_SERVICE_PORT &
 
 # Set the entrypoint
-ENTRYPOINT ["python", "/template/pipeline_launcher.py"]
+ENTRYPOINT ["python", "main.py"]
+
+
+apache-beam[gcp]==2.61.0
+apache-beam-client==2.61.0
+
 
 
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
-import subprocess
-import time
 import logging
-import argparse
-from typing import Any, Dict
+import json
 
-class SQLFlexTemplateOptions(PipelineOptions):
+class CustomPipelineOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
-        parser.add_argument('--gcs_pipeline_path',
-                          required=True,
-                          help='GCS path to the pipeline file')
-        parser.add_argument('--expansion_service_port',
-                          default='8097',
-                          help='Port for the SQL expansion service')
+        parser.add_value_provider_argument(
+            '--temp_location',
+            help='GCS Temp directory for the pipeline'
+        )
+        parser.add_value_provider_argument(
+            '--sql_expansion_service',
+            default='localhost:8097',
+            help='SQL Expansion Service address'
+        )
 
-def start_expansion_service():
-    """Start the SQL expansion service"""
-    cmd = [
-        'java', '-jar',
-        '/opt/apache/beam/jars/beam-sdks-java-extensions-sql-expansion-service-2.61.0.jar',
-        '--expansion_port', '8097'
+def run_pipeline(pipeline_options):
+    # Sample data
+    sample_data = [
+        {'id': 1, 'name': 'John', 'age': 30},
+        {'id': 2, 'name': 'Jane', 'age': 25},
+        {'id': 3, 'name': 'Bob', 'age': 35}
     ]
-    process = subprocess.Popen(cmd)
-    time.sleep(5)  # Wait for service to start
-    return process
 
-def run_pipeline(pipeline_path: str, options: Dict[str, Any]):
-    """Download and run the pipeline"""
-    # Download pipeline file from GCS
-    subprocess.run(['gsutil', 'cp', pipeline_path, '/tmp/current_pipeline.py'])
-    
-    # Import and run the pipeline
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("pipeline", "/tmp/current_pipeline.py")
-    pipeline_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(pipeline_module)
-    
-    # Run the pipeline's main function
-    if hasattr(pipeline_module, 'run'):
-        pipeline_module.run(options)
-    else:
-        raise ValueError("Pipeline file must contain a 'run' function")
+    with beam.Pipeline(options=pipeline_options) as pipeline:
+        # Create initial PCollection
+        records = pipeline | "CreateData" >> beam.Create(sample_data)
+        
+        # Convert to Row format for SQL
+        rows = records | "ToRows" >> beam.Map(
+            lambda x: beam.Row(
+                id=x['id'],
+                name=x['name'],
+                age=x['age']
+            )
+        )
 
-def run():
-    logging.getLogger().setLevel(logging.INFO)
-    
-    # Parse the command-line arguments
-    parser = argparse.ArgumentParser()
-    known_args, pipeline_args = parser.parse_known_args()
-    
-    # Create pipeline options
-    options = SQLFlexTemplateOptions(pipeline_args)
-    
-    # Start expansion service
-    expansion_service = start_expansion_service()
-    
-    try:
-        # Run the pipeline
-        run_pipeline(
-            options.gcs_pipeline_path,
-            {
-                'expansion_service_port': options.expansion_service_port,
-                **options.get_all_options()
+        # Apply SQL transform
+        sql_results = rows | "SQLTransform" >> beam.transforms.SqlTransform(
+            """
+            SELECT id, name, age 
+            FROM PCOLLECTION 
+            WHERE age > 25
+            """,
+            expansion_service=pipeline_options.sql_expansion_service
+        )
+
+        # Convert results back to dictionary
+        final_results = sql_results | "ToDict" >> beam.Map(
+            lambda row: {
+                'id': row.id,
+                'name': row.name,
+                'age': row.age
             }
         )
-    finally:
-        # Clean up
-        expansion_service.terminate()
+
+        # Write results (for example, to console)
+        final_results | "Print" >> beam.Map(print)
 
 if __name__ == '__main__':
-    run()
+    logging.getLogger().setLevel(logging.INFO)
+    pipeline_options = CustomPipelineOptions()
+    run_pipeline(pipeline_options)
 
 
 
 {
-  "image": "gcr.io/YOUR_PROJECT/beam-sql-flex",
-  "metadata": {
-    "name": "Beam SQL Flex Template",
-    "description": "Flex template for running Beam SQL pipelines with expansion service",
+    "name": "Beam SQL Pipeline",
+    "description": "Apache Beam pipeline using SQL expansion service",
     "parameters": [
-      {
-        "name": "gcs_pipeline_path",
-        "label": "Pipeline File Path",
-        "helpText": "GCS path to the pipeline file to execute",
-        "regexes": ["^gs://.*\\.py$"],
-        "isOptional": false
-      }
-    ]
-  },
-  "sdkInfo": {
-    "language": "PYTHON"
-  }
+        {
+            "name": "temp_location",
+            "label": "Temporary Location",
+            "helpText": "GCS temporary location for the pipeline",
+            "regexes": ["^gs://[a-z0-9-_.]+/[a-z0-9-_./]+$"],
+            "required": true
+        },
+        {
+            "name": "sql_expansion_service",
+            "label": "SQL Expansion Service",
+            "helpText": "Address of the SQL expansion service",
+            "default": "localhost:8097"
+        }
+    ],
+    "sdkInfo": {
+        "language": "PYTHON"
+    }
 }
 
 
 
+
+
+# First, build and push the Docker image
+docker build -t gcr.io/[PROJECT]/beam-sql-pipeline .
+docker push gcr.io/[PROJECT]/beam-sql-pipeline
+
+# Create the Flex Template
 gcloud dataflow flex-template build \
-    gs://YOUR_BUCKET/templates/beam-sql-flex.json \
-    --image gcr.io/YOUR_PROJECT/beam-sql-flex \
-    --sdk-language PYTHON \
-    --metadata-file template.json
+  gs://[BUCKET]/templates/beam-sql-pipeline.json \
+  --image gcr.io/[PROJECT]/beam-sql-pipeline \
+  --sdk-language PYTHON \
+  --metadata-file metadata.json
 
-
-
+# Launch the template
 gcloud dataflow flex-template run "beam-sql-job-$(date +%Y%m%d-%H%M%S)" \
-    --template-file-gcs-location gs://YOUR_BUCKET/templates/beam-sql-flex.json \
-    --parameters gcs_pipeline_path=gs://YOUR_BUCKET/pipelines/your_pipeline.py \
-    --region=YOUR_REGION
-
-
-
-
-
-import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions
-import argparse
-import logging
-from typing import Dict, Any
-
-def run(custom_options: Dict[str, Any] = None):
-    """Main pipeline function that writes sample data and queries it"""
-    
-    # Create pipeline options
-    parser = argparse.ArgumentParser()
-    known_args, pipeline_args = parser.parse_known_args()
-    
-    pipeline_options = PipelineOptions(pipeline_args)
-    if custom_options:
-        pipeline_options.display_data = custom_options
-
-    # Sample data - you can modify this as needed
-    sample_data = [
-        {'id': 1, 'name': 'John', 'department': 'IT', 'salary': 75000},
-        {'id': 2, 'name': 'Alice', 'department': 'HR', 'salary': 65000},
-        {'id': 3, 'name': 'Bob', 'department': 'IT', 'salary': 80000},
-        {'id': 4, 'name': 'Carol', 'department': 'Finance', 'salary': 90000},
-    ]
-
-    # Schema for the data
-    schema = 'id:INTEGER, name:STRING, department:STRING, salary:INTEGER'
-
-    with beam.Pipeline(options=pipeline_options) as p:
-        # Write initial data to BigQuery
-        initial_data = (p 
-            | 'CreateInitialData' >> beam.Create(sample_data)
-            | 'WriteToBigQuery' >> beam.io.WriteToBigQuery(
-                'your-project:your_dataset.employees',  # Replace with your table
-                schema=schema,
-                create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-                write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND
-            ))
-
-        # Convert data for SQL processing
-        employees = (p
-            | 'CreateData' >> beam.Create(sample_data)
-            | 'ToRows' >> beam.ToRow())
-
-        # Register the PCollection as a table
-        employees.schema = schema
-
-        # Example SQL query using the expansion service
-        sql_query = """
-            SELECT 
-                department,
-                COUNT(*) as employee_count,
-                AVG(salary) as avg_salary
-            FROM PCOLLECTION
-            GROUP BY department
-            HAVING COUNT(*) > 0
-        """
-
-        # Apply SQL transform using expansion service
-        query_results = employees | 'SQLQuery' >> beam.ExternalTransform(
-            'beam:transform:org.apache.beam.sdk.extensions.sql:sql',
-            {'query': sql_query},
-            f'localhost:{pipeline_options.expansion_service_port}'
-        )
-
-        # Write query results to a different BigQuery table
-        query_results | 'WriteResultsToBigQuery' >> beam.io.WriteToBigQuery(
-            'your-project:your_dataset.department_summary',  # Replace with your table
-            schema='department:STRING, employee_count:INTEGER, avg_salary:FLOAT',
-            create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-            write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND
-        )
-
-if __name__ == '__main__':
-    logging.getLogger().setLevel(logging.INFO)
-    run()
+  --template-file-gcs-location gs://[BUCKET]/templates/beam-sql-pipeline.json \
+  --region [REGION] \
+  --parameters temp_location=gs://[BUCKET]/temp
